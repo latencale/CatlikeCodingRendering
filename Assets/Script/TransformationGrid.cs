@@ -73,7 +73,7 @@ public class TransformationGrid : MonoBehaviour
             transformation = transformations[0].Matrix;
             for (int i = 1; i < transformations.Count; i++)
             {
-                transformation = transformations[i].Matrix;
+                transformation = transformations[i].Matrix * transformation;
             }
         }
     }

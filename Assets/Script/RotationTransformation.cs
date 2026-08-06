@@ -19,8 +19,8 @@ public class RotationTransformation : Transformation
 
             Matrix4x4 matrix= new Matrix4x4();
             matrix.SetRow(0, new Vector4(
-                -cosY * cosZ,
-                cosX * cosZ + sinX * sinY * cosZ,
+                cosY * cosZ,
+                cosX * sinZ + sinX * sinY * cosZ,
                 sinX * sinZ - cosX * sinY * cosZ,
                 0f
                 ));
