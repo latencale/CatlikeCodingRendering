@@ -6,7 +6,7 @@ public class TransformationGrid : MonoBehaviour
     public Transform prefab;
 
     public int gridResolution = 10;
-    public float focalLengh = 1f;
+
 
     Transform[] grid;
     Matrix4x4 transformation;
