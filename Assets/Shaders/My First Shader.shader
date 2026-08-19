@@ -21,7 +21,7 @@ Shader "Custom/My First Shader"{
 			//NOTE:从上到下编译，属性和方法要有顺序
 
 			//着色器中变量名称应与属性名一致
-			float4 _Tint;//
+			float4 _Tint;
 			sampler2D _MainTex;//sampler2D纹理读取器
 			float4 _MainTex_ST;//ST代表缩放(Scale)和平移(Translation)
 
