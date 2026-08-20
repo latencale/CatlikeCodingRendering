@@ -4,9 +4,21 @@ Shader "Custom/Physically-Based Shading"{
 	Properties{
 		_Tint ("Tint", Color) = (1,1,1,1) //颜色
 		_MainTex ("Albedo", 2D) = "white" {} //主纹理
+		[NoScaleOffset] _NormalMap ("Normals", 2D) = "bump"{} //法线贴图
+		//[NoScaleOffset]特性：隐藏平铺tiling和偏移offset
+		_BumpScale ("Bump Scale", Float) = 1 //法线贴图的强度
 		[Gamma] _Metallic ("Metallic", Range(0,1)) = 0 //金属度
 		_Smoothness ("Smoothness", Range(0, 1)) = 0.5 //高光的平滑度
+		_DetailTex ("Detail Texture", 2D) = "gray" {} //细节纹理
+		[NoScaleOffset] _DetailNormalMap ("Detail Normals", 2D) = "bump"{} //细节法线贴图
+		_DetailBumpScale ("Detail Bump Scale",Float) = 1 //细节法线贴图强度
 	}
+
+	CGINCLUDE
+
+	#define BINORMAL_PER_FRAGMENT
+
+	ENDCG
 
 	SubShader{
 
