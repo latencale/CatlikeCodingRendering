@@ -1,8 +1,9 @@
 #if !defined(MY_LIGHTING_INCLUDED)
 #define MY_LIGHTING_INCLUDED
 
-#include "AutoLight.cginc"
 #include "UnityPBSLighting.cginc"
+#include "AutoLight.cginc"
+
 
 float4 _Tint;
 sampler2D _MainTex, _DetailTex; //sampler2D纹理读取器
@@ -14,9 +15,10 @@ float _BumpScale, _DetailBumpScale;
 
 struct Interpolators
 {
-    float4 position : POSITION;
+    float4 pos : POSITION;
     float4 uv : TEXCOORD0; //主uv 和 细节uv
     float3 normal : TEXCOORD1; //第二套纹理
+    
 #if defined(BINORMAL_PER_FRAGMENT)//在片元着色器进行运算
     float4 tangent : TEXCOORD2;//切线空间
 #else//在顶点着色器进行运算，与Unity标准着色器一致
@@ -26,15 +28,18 @@ struct Interpolators
     float3 worldPos : TEXCOORD4;
 				//SV代表系统值，POSITION代表顶点位置,TEXCOORD代表纹理坐标
     
+    SHADOW_COORDS(5)
+    //用于存储阴影贴图采样坐标的成员变量，5为编号，即float4 _ShadowCoord : TEXCOORD5;
+    
     #if defined(VERTEXLIGHT_ON)
-        float3 vertexLightColor : TEXCOORD5; //
+        float3 vertexLightColor : TEXCOORD6; //顶点光照颜色
     #endif
 };
 			//NOTE:可以定义数据结构
 
 struct VertexData
 {
-    float4 position : POSITION;
+    float4 vertex : POSITION;
     float3 normal : NORMAL;
     float4 tangent : TANGENT;
     float2 uv : TEXCOORD0;
@@ -74,23 +79,29 @@ float3 CreateBinormal(float3 normal, float3 tangent, float binormalSign)
 Interpolators MyVertexProgram(VertexData v)
 {
     Interpolators i;
-    i.position = UnityObjectToClipPos(v.position);
+    i.pos = UnityObjectToClipPos(v.vertex);
 				// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
 				//模型空间转换到裁剪空间
-    i.worldPos = mul(unity_ObjectToWorld, v.position);
+    i.worldPos = mul(unity_ObjectToWorld, v.vertex);
     i.normal = UnityObjectToWorldNormal(v.normal);
 				//i.normal = mul(transpose((float3x3)unity_WorldToObject), v.normal);
 				//mul(A,B)矩阵乘法,unity_ObjectToWorld模型空间转换到世界空间,unity_WorldToObject世界空间转换到模型空间
+
 #if defined(BINORMAL_PER_FRAGMENT)
     i.tangent = float4(UnityObjectToWorldDir(v.tangent.xyz), v.tangent.w);
 #else
     i.tangent = UnityObjectToWorldDir(v.tangent.xyz);
     i.binormal = CreateBinormal(i.normal, i.tangent, v.tangent.w);
 #endif
+
     i.uv.xy = TRANSFORM_TEX(v.uv, _MainTex);
 				//使用宏简写，i.uv = v.uv * _MainTex_ST.xy + _MainTex_ST.zw;
     i.uv.zw = TRANSFORM_TEX(v.uv, _DetailTex);
-        ComputeVertexLightColor(i);
+
+    TRANSFER_SHADOW(i);
+    //计算阴影贴图的采样坐标，并将结果存储到传递结构体 i 的 _ShadowCoord 成员中。
+    
+    ComputeVertexLightColor(i);
     return i;
 				
 }
@@ -98,15 +109,17 @@ Interpolators MyVertexProgram(VertexData v)
 UnityLight CreateLight(inout Interpolators i)
 {
     UnityLight light;
+    
     #if defined(POINT) || defined(POINT_COOKIE) || defined(SPOT) 
         light.dir = normalize(_WorldSpaceLightPos0.xyz - i.worldPos); //环境光的方向
     #else   
         light.dir = _WorldSpaceLightPos0.xyz;
     #endif
     
-    UNITY_LIGHT_ATTENUATION(attenuation, 0, i.worldPos);
-    //插入计算正确衰减因子的代码，（变量名，与阴影有关，世界坐标位置）
+    UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos);
+    //插入计算正确衰减因子的代码，（变量名，包含阴影的插值器，世界坐标位置）
         //该宏会自定义该变量
+    
     light.color = _LightColor0.rgb * attenuation; //光的颜色
     light.ndotl = DotClamped(i.normal, light.dir);//法线与光线方向的点积
     return light;

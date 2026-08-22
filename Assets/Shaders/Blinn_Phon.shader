@@ -22,6 +22,7 @@ Shader "Custom/Blinn_Phone"{
 
 			#include "UnityStandardBRDF.cginc"
 			#include "UnityStandardUtils.cginc"
+			#include "UnityPBSLighting.cginc"
 
 			float4 _Tint;
 			sampler2D _MainTex;//sampler2D纹理读取器
@@ -69,15 +70,30 @@ Shader "Custom/Blinn_Phone"{
 				//_WorldSpaceCameraPos代表相机的位置
 				float3 lightColor = _LightColor0.rgb;//光的颜色
 				//_LightColor0代表光的颜色
+				
 				float3 albedo = tex2D(_MainTex, i.uv).rgb * _Tint.rgb;//反照率：物体的颜色
+				
 				float3 specularTint ;//镜面反射颜色
 				float oneMinusReflectivity ;
 				albedo = DiffuseAndSpecularFromMetallic(
 					albedo, _Metallic, specularTint, oneMinusReflectivity);
-				float3 diffuse = albedo * lightColor * DotClamped(lightDir,i.normal);//漫反射：最终的颜色
-				float3 halfVector = normalize(lightDir + viewDir);//Blinn-Phon模型，光源与观察者的半向量
-				float3 specular = specularTint * lightColor * pow(DotClamped(halfVector,i.normal),_Smoothness * 100);//镜面反射
-				return float4(diffuse + specular,1);
+				
+				UnityLight light;
+    light.color = lightColor;
+    light.dir = lightDir;
+    light.ndotl = DotClamped(lightDir, i.normal); // 漫反射项
+
+    UnityIndirect indirectLight;
+    indirectLight.diffuse = 0; // 暂时忽略环境光
+    indirectLight.specular = 0;
+
+    // 5. 调用PBS计算并返回
+    return UNITY_BRDF_PBS(
+        albedo, specularTint, 
+        oneMinusReflectivity, _Smoothness, 
+        i.normal, viewDir, 
+        light, indirectLight
+    );
 			}
 
 			ENDCG//结束标志
