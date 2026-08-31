@@ -68,6 +68,7 @@ void ComputeVertexLightColor(inout Interpolators i)
 #endif
 }
 
+//创造复法线
 float3 CreateBinormal(float3 normal, float3 tangent, float binormalSign)
 {
     return cross(normal, tangent.xyz) *
@@ -106,6 +107,7 @@ Interpolators MyVertexProgram(VertexData v)
 				
 }
 
+//创造直接光
 UnityLight CreateLight(inout Interpolators i)
 {
     UnityLight light;
@@ -125,20 +127,81 @@ UnityLight CreateLight(inout Interpolators i)
     return light;
 }
 
-UnityIndirect CreateIndirectLight(Interpolators i)
+//盒体投影
+float3 BoxProjection(float3 direction, float3 position, float4 cubemapPosition, float3 boxMin, float3 boxMax)
+{                   //反射方向、采样位置、立方体贴图中心位置、盒子边界
+#if UNITY_SPECCUBE_BOX_PROJECTION    
+    UNITY_BRANCH //使用分支
+    if (cubemapPosition.w > 0)
+    {
+        float3 factors = ((direction > 0 ? boxMax : boxMin) - position) / direction;
+        //世界空间中的盒子边界，转换为以当前采样点position为原点的局部空间坐标
+        float scalar = min(min(factors.x, factors.y), factors.z); //道道盒子的时间，由最先被撞到的面决定
+        direction = direction * scalar + (position - cubemapPosition); //立方体贴图中心到盒子边界的向量
+    }
+#endif
+    return direction;
+}
+
+//创造间接光
+UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
 {
     UnityIndirect indirectLight;
     indirectLight.diffuse = 0;
     indirectLight.specular = 0;
     
-    #if defined(VERTEXTLIGHT_ON)
-        indirectLight.diffuse = i.vertexLightColor;
-    #endif
+#if defined(VERTEXTLIGHT_ON)
+    indirectLight.diffuse = i.vertexLightColor;
+#endif
     
-    #if defined(FORWARD_BASE_PASS)
-        indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
-        //ShadeSH9于计算 9 阶球谐函数（第 0 到第 2 阶）的环境光照
-    #endif
+#if defined(FORWARD_BASE_PASS)
+    indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
+     //ShadeSH9于计算 9 阶球谐函数（第 0 到第 2 阶）的环境光照
+     float3 reflectionDir = reflect(-viewDir, i.normal);  
+    
+    /*
+    float roughness = 1 - _Smoothness;
+    roughness *= 1.7 - 0.7 * roughness;//粗糙度与mipmap的关系函数：1.7 * r - 0.7 * r^2
+    float4 envSample = UNITY_SAMPLE_TEXCUBE_LOD(
+        unity_SpecCube0, reflectionDir, roughness * UNITY_SPECCUBE_LOD_STEPS
+    );//环境采样,光滑度越低，mipmap较高，生成更模糊的图像。
+    //UNTIY_SPECCUBE_LOD_STEPS用于表示反射模糊程度的立方体贴图（Cubemap）的 Mipmap 层级数量
+    indirectLight.specular = DecodeHDR(envSample, unity_SpecCube0_HDR);
+    //将采样从HDR格式转化为RGB，使用DecodeHDR函数
+    */
+    
+    Unity_GlossyEnvironmentData envData;//已过时
+    envData.roughness = 1 - _Smoothness;
+    envData.reflUVW = BoxProjection(reflectionDir, i.worldPos, 
+        unity_SpecCube0_ProbePosition, 
+        unity_SpecCube0_BoxMin, unity_SpecCube0_BoxMax
+    );
+    float3 probe0 = Unity_GlossyEnvironment(//旧版的环境镜面反射采样函数
+        UNITY_PASS_TEXCUBE(unity_SpecCube0), unity_SpecCube0_HDR, envData
+    );//宏，将反射探针数据传给函数，与反射探针关联给HDR解码数据，环境数据
+    envData.reflUVW = BoxProjection(reflectionDir, i.worldPos,
+        unity_SpecCube1_ProbePosition,
+        unity_SpecCube1_BoxMin, unity_SpecCube1_BoxMax
+    );
+    
+#if UNITY_SPECCUBE_BLENDING
+    float interpolator = unity_SpecCube0_BoxMin.w;
+    UNITY_BRANCH
+    if(interpolator < 0.99999){
+        float3 probe1 = Unity_GlossyEnvironment(
+            UNITY_PASS_TEXCUBE_SAMPLER(unity_SpecCube1, unity_SpecCube0), unity_SpecCube1_HDR,envData
+        );
+        //UNITY_PASS_TEXCUBE_SAMPLER()传递第二个反射探针的立方体贴图纹理和采样器,1是第二个探针的纹理数据，0是采样器
+        indirectLight.specular = lerp(probe1, probe0, unity_SpecCube0_BoxMin.w);
+    }
+    else{ //之在第0个盒子里
+        indirectLight.specular = probe0;
+#else
+    indirectLight = probe0;
+#endif
+    
+}
+#endif
     
     return indirectLight;
 }
@@ -185,7 +248,7 @@ float4 MyFragmentProgram(Interpolators i) : SV_TARGET
     return UNITY_BRDF_PBS(albedo, specularTint,
 					oneMinusReflectivity, _Smoothness,
 					i.normal, viewDir,
-					CreateLight(i), CreateIndirectLight(i));
+					CreateLight(i), CreateIndirectLight(i, viewDir));
 }
 
 #endif
