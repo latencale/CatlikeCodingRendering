@@ -78,22 +78,31 @@ Shader "Custom/Blinn_Phone"{
 				albedo = DiffuseAndSpecularFromMetallic(
 					albedo, _Metallic, specularTint, oneMinusReflectivity);
 				
-				UnityLight light;
-    light.color = lightColor;
-    light.dir = lightDir;
-    light.ndotl = DotClamped(lightDir, i.normal); // 漫反射项
+				float3 diffuse =
+					albedo * lightColor * DotClamped(lightDir, i.normal);
 
-    UnityIndirect indirectLight;
-    indirectLight.diffuse = 0; // 暂时忽略环境光
-    indirectLight.specular = 0;
+				float3 halfVector = normalize(lightDir + viewDir);
+				float3 specular = specularTint * lightColor * pow(
+					DotClamped(halfVector, i.normal),
+					_Smoothness * 100
+				);
+				return float4(specular + diffuse,1);
+				/*UnityLight light;
+				light.color = lightColor;
+				light.dir = lightDir;
+				light.ndotl = DotClamped(lightDir, i.normal); // 漫反射项
 
-    // 5. 调用PBS计算并返回
-    return UNITY_BRDF_PBS(
-        albedo, specularTint, 
-        oneMinusReflectivity, _Smoothness, 
-        i.normal, viewDir, 
-        light, indirectLight
-    );
+				UnityIndirect indirectLight;
+				indirectLight.diffuse = 0; // 暂时忽略环境光
+				indirectLight.specular = 0;
+
+				// 5. 调用PBS计算并返回
+				return UNITY_BRDF_PBS(
+					albedo, specularTint, 
+					oneMinusReflectivity, _Smoothness, 
+					i.normal, viewDir, 
+					light, indirectLight
+				);*/
 			}
 
 			ENDCG//结束标志
