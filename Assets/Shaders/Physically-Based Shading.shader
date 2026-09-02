@@ -4,14 +4,22 @@ Shader "Custom/Physically-Based Shading"{
 	Properties{
 		_Tint ("Tint", Color) = (1,1,1,1) //颜色
 		_MainTex ("Albedo", 2D) = "white" {} //主纹理
+		
 		[NoScaleOffset] _NormalMap ("Normals", 2D) = "bump"{} //法线贴图
 		//[NoScaleOffset]特性：隐藏平铺tiling和偏移offset
 		_BumpScale ("Bump Scale", Float) = 1 //法线贴图的强度
+		
+		[NoScaleOffset] _MetallicMap("Metallic", 2D) = "white" {} //金属度贴图
 		[Gamma] _Metallic ("Metallic", Range(0,1)) = 0 //金属度
 		_Smoothness ("Smoothness", Range(0, 1)) = 0.5 //高光的平滑度
-		_DetailTex ("Detail Texture", 2D) = "gray" {} //细节纹理
+		[HideInSpector] _SmoothnessSource ("Smoothness Source", Float) = 0 //高光平滑度来源，0=从金属度贴图获取，1=从Albedo贴图的Alpha通道获取
+
+		_DetailTex ("Detail Albedo", 2D) = "gray" {} //细节纹理
 		[NoScaleOffset] _DetailNormalMap ("Detail Normals", 2D) = "bump"{} //细节法线贴图
 		_DetailBumpScale ("Detail Bump Scale",Float) = 1 //细节法线贴图强度
+	
+		[NoScaleOffset] _EmissionMap ("Emission", 2D) = "black" {} //自发光贴图
+		_Emission ("Emission", Color) = (0,0,0) //自发光强度
 	}
 
 	CGINCLUDE
@@ -36,6 +44,9 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma multi_compile _ SHADOWS_SCREEN //屏幕空间阴影：将阴影贴图投射并转换到屏幕空间，生成一张屏幕空间的阴影纹理
 			#pragma multi_compile _ VERTEXLIGHT_ON //顶点光照：4个
 			//生成两个着色器变体(Shader Variants)，‘_’ 是占位符，表示不定义任何关键字的变体，即关闭某
+			#pragma shader_feature _METALLIC_MAP
+			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC //高光平滑度来源
+			#pragma shader_feature _EMISSION_MAP //自发光贴图
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
@@ -68,6 +79,8 @@ Shader "Custom/Physically-Based Shading"{
 			// _fullshadows:生成带阴影的额外光源变体
 			//为当前Pass生成多个Shader Variants,
 			//DIRECTIONAL方向光，POINT点光源,SPOT聚光灯，COOKIE遮罩，
+			#pragma shader_feature _METALLIC_MAP
+			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC 
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
@@ -100,4 +113,5 @@ Shader "Custom/Physically-Based Shading"{
 			ENDCG
 		}
 	}
+	CustomEditor "MyLightingShaderGUI"
 }

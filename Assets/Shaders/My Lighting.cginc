@@ -8,10 +8,13 @@
 float4 _Tint;
 sampler2D _MainTex, _DetailTex; //sampler2D纹理读取器
 float4 _MainTex_ST, _DetailTex_ST; //ST代表缩放(Scale)和平移(Translation)
+sampler2D _MetallicMap; //金属度贴图
 float _Metallic;
 float _Smoothness;
 sampler2D _NormalMap, _DetailNormalMap; //法线贴图
-float _BumpScale, _DetailBumpScale;
+float _BumpScale, _DetailBumpScale;//凹凸
+sampler2D _EmissionMap; //自发光贴图
+float3 _Emission; //自发光颜色
 
 struct Interpolators
 {
@@ -35,7 +38,6 @@ struct Interpolators
         float3 vertexLightColor : TEXCOORD6; //顶点光照颜色
     #endif
 };
-			//NOTE:可以定义数据结构
 
 struct VertexData
 {
@@ -107,12 +109,49 @@ Interpolators MyVertexProgram(VertexData v)
 				
 }
 
+//计算金属度
+float GetMetallic(Interpolators i)
+{
+#if defined(_METALLIC_MAP)
+    return tex2D(_MetallicMap, i.uv.xy).r ;
+#else
+    return _Metallic;
+#endif
+}
+
+
+float GetSmoothness(Interpolators i)
+{
+    float smoothness = 1;
+#if defined(_SMOOTHNESS_ALBEDO)
+    smoothness = tex2D(_MainTex, i.uv.xy).a;
+#elif defined(_SMOOTHNESS_METALLIC) && defined(_METALLIC_MAP)  
+    smoothness = tex2D(_MetallicMap, i.uv.xy).a ;
+    //金属贴图中 r通道存储金属度，a通道存储光滑度
+#endif
+    return smoothness * _Smoothness;
+
+}
+
+float3 GetEmission(Interpolators i)
+{
+#if defined(FORWARD_BASE_PASS)
+    #if defined(_EMISSION_MAP)
+        return tex2D(_EmissionMap, i.uv.xy) * _Emission;
+    #else
+        return _Emission;
+    #endif
+#else
+    return 0;
+#endif
+}
+
 //创造直接光
 UnityLight CreateLight(inout Interpolators i)
 {
     UnityLight light;
     
-    #if defined(POINT) || defined(POINT_COOKIE) || defined(SPOT) 
+#if defined(POINT) || defined(POINT_COOKIE) || defined(SPOT) 
         light.dir = normalize(_WorldSpaceLightPos0.xyz - i.worldPos); //环境光的方向
     #else   
         light.dir = _WorldSpaceLightPos0.xyz;
@@ -171,7 +210,7 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
     */
     
     Unity_GlossyEnvironmentData envData;//已过时
-    envData.roughness = 1 - _Smoothness;
+    envData.roughness = 1 - GetSmoothness(i);
     envData.reflUVW = BoxProjection(reflectionDir, i.worldPos, 
         unity_SpecCube0_ProbePosition, 
         unity_SpecCube0_BoxMin, unity_SpecCube0_BoxMax
@@ -206,10 +245,13 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
     return indirectLight;
 }
 
+//初始化片元法线
 void IntializeFragmentNormal(inout Interpolators i)
 {
     float3 mainNormal = UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy),_BumpScale);
     float3 detailNormal = UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
+    //从法线贴图中获取法线向量，并将其从纹理空间转换为切线空间
+    
     //i.normal.xy = tex2D(_NormalMap, i.uv).wy * 2 - 1;
     //i.normal.xy *= _BumpScale;
     //i.normal.z = sqrt(1 - saturate(dot(i.normal.xy, i.normal.xy)));
@@ -242,13 +284,15 @@ float4 MyFragmentProgram(Interpolators i) : SV_TARGET
     float3 specularTint; //镜面反射颜色
     float oneMinusReflectivity;
     albedo = DiffuseAndSpecularFromMetallic(
-					albedo, _Metallic, specularTint, oneMinusReflectivity
+					albedo, GetMetallic(i), specularTint, oneMinusReflectivity
 				);
     
-    return UNITY_BRDF_PBS(albedo, specularTint,
-					oneMinusReflectivity, _Smoothness,
+    float4 color = UNITY_BRDF_PBS(albedo, specularTint,
+					oneMinusReflectivity, GetSmoothness(i),
 					i.normal, viewDir,
 					CreateLight(i), CreateIndirectLight(i, viewDir));
+    color.rgb += GetEmission(i);
+    return color;
 }
 
 #endif
