@@ -6,15 +6,21 @@
 
 
 float4 _Tint;
-sampler2D _MainTex, _DetailTex; //sampler2D纹理读取器
+sampler2D _MainTex, _DetailTex, _DetailMask; //sampler2D纹理读取器
 float4 _MainTex_ST, _DetailTex_ST; //ST代表缩放(Scale)和平移(Translation)
+
 sampler2D _MetallicMap; //金属度贴图
 float _Metallic;
 float _Smoothness;
+
 sampler2D _NormalMap, _DetailNormalMap; //法线贴图
 float _BumpScale, _DetailBumpScale;//凹凸
+
 sampler2D _EmissionMap; //自发光贴图
 float3 _Emission; //自发光颜色
+
+sampler2D _OcclusionMap; //遮挡贴图
+float _OcclusionStrength; //遮挡强度
 
 struct Interpolators
 {
@@ -146,6 +152,49 @@ float3 GetEmission(Interpolators i)
 #endif
 }
 
+float GetOcclusion(Interpolators i)
+{
+#if defined(_OCCLUSION_MAP)
+    return lerp(1, tex2D(_OcclusionMap,i.uv.xy).g, _OcclusionStrength);
+#else
+    return 1;
+#endif    
+}
+
+float GetDetailMask(Interpolators i)
+{
+#if defined(_DETAIL_MASK)
+    return tex2D(_DetailMask, i.uv.xy).a;
+#else
+    return 1;
+#endif
+}
+
+float3 GetAlbedo(Interpolators i)
+{
+    float3 albedo = tex2D(_MainTex, i.uv.xy).rgb * _Tint.rgb; //反照率：物体的颜色
+#if defined(_DETAIL_ALBEDO_MAP)
+    float3 details = tex2D(_DetailTex, i.uv.zw) * unity_ColorSpaceDouble;; //细节贴图
+    albedo = lerp(albedo, albedo * details, GetDetailMask(i));
+#endif
+    return albedo;
+}
+
+float3 GetTangentSpaceNormal(Interpolators i)
+{
+    float3 normal = float3(0, 0, 1);
+#if defined(_NORMAL_MAP)
+    normal = UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy), _BumpScale);
+#endif    
+#if defined(_DETAIL_NORMAL_MAP)
+    float3 detailNormal = UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
+    //从法线贴图中获取法线向量，并将其从纹理空间转换为切线空间
+    detailNormal = lerp(float3(0, 0, 1), detailNormal, GetDetailMask(i));
+    normal =BlendNormals(normal, detailNormal);
+#endif
+    return normal;
+}
+
 //创造直接光
 UnityLight CreateLight(inout Interpolators i)
 {
@@ -223,23 +272,27 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
         unity_SpecCube1_BoxMin, unity_SpecCube1_BoxMax
     );
     
-#if UNITY_SPECCUBE_BLENDING
-    float interpolator = unity_SpecCube0_BoxMin.w;
-    UNITY_BRANCH
-    if(interpolator < 0.99999){
-        float3 probe1 = Unity_GlossyEnvironment(
-            UNITY_PASS_TEXCUBE_SAMPLER(unity_SpecCube1, unity_SpecCube0), unity_SpecCube1_HDR,envData
-        );
-        //UNITY_PASS_TEXCUBE_SAMPLER()传递第二个反射探针的立方体贴图纹理和采样器,1是第二个探针的纹理数据，0是采样器
-        indirectLight.specular = lerp(probe1, probe0, unity_SpecCube0_BoxMin.w);
-    }
-    else{ //之在第0个盒子里
-        indirectLight.specular = probe0;
-#else
-    indirectLight = probe0;
-#endif
+    #if UNITY_SPECCUBE_BLENDING
+        float interpolator = unity_SpecCube0_BoxMin.w;
+        UNITY_BRANCH
+        if(interpolator < 0.99999){
+            float3 probe1 = Unity_GlossyEnvironment(
+                UNITY_PASS_TEXCUBE_SAMPLER(unity_SpecCube1, unity_SpecCube0), unity_SpecCube1_HDR,envData
+            );
+            //UNITY_PASS_TEXCUBE_SAMPLER()传递第二个反射探针的立方体贴图纹理和采样器,1是第二个探针的纹理数据，0是采样器
+            indirectLight.specular = lerp(probe1, probe0, unity_SpecCube0_BoxMin.w);
+        }
+        else //之在第0个盒子里
+            indirectLight.specular = probe0;
+    #else
+        indirectLight = probe0;
+    #endif
     
-}
+    float occlusion = GetOcclusion(i);
+    indirectLight.diffuse *= occlusion;
+    indirectLight.specular *= occlusion;
+    //环境光遮蔽（AO）
+    
 #endif
     
     return indirectLight;
@@ -248,18 +301,7 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
 //初始化片元法线
 void IntializeFragmentNormal(inout Interpolators i)
 {
-    float3 mainNormal = UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy),_BumpScale);
-    float3 detailNormal = UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
-    //从法线贴图中获取法线向量，并将其从纹理空间转换为切线空间
-    
-    //i.normal.xy = tex2D(_NormalMap, i.uv).wy * 2 - 1;
-    //i.normal.xy *= _BumpScale;
-    //i.normal.z = sqrt(1 - saturate(dot(i.normal.xy, i.normal.xy)));
-    //法线贴图纹理用DXT5nm，而非RGB。DXT5nm仅存储法线的x,y分量
-    
-    float3 tangentSpaceNormal = BlendNormals(mainNormal, detailNormal);
-    //i.normal = float3(mainNormal.xy + detailNormal.xy, mainNormal.z * detailNormal.z);//白化混合
-    //i.normal = float3(mainNormal.xy / mainNormal.z + detailNormal.xy / detailNormal.z,1);
+    float3 tangentSpaceNormal = GetTangentSpaceNormal(i);
     
 #if defined(BINORMAL_PER_FRAGMENT)
     float3 binormal = CreateBinormal(i.normal,i.tangent.xyz,i.tangent.w);
@@ -279,12 +321,11 @@ float4 MyFragmentProgram(Interpolators i) : SV_TARGET
     
     float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos); //我的视角
 				//_WorldSpaceCameraPos代表相机的位置
-    float3 albedo = tex2D(_MainTex, i.uv.xy).rgb * _Tint.rgb; //反照率：物体的颜色
-    albedo *= tex2D(_DetailTex, i.uv.zw) * unity_ColorSpaceDouble;
+
     float3 specularTint; //镜面反射颜色
     float oneMinusReflectivity;
-    albedo = DiffuseAndSpecularFromMetallic(
-					albedo, GetMetallic(i), specularTint, oneMinusReflectivity
+    float3 albedo = DiffuseAndSpecularFromMetallic(
+					GetAlbedo(i), GetMetallic(i), specularTint, oneMinusReflectivity
 				);
     
     float4 color = UNITY_BRDF_PBS(albedo, specularTint,

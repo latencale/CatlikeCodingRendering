@@ -20,6 +20,11 @@ Shader "Custom/Physically-Based Shading"{
 	
 		[NoScaleOffset] _EmissionMap ("Emission", 2D) = "black" {} //自发光贴图
 		_Emission ("Emission", Color) = (0,0,0) //自发光强度
+
+		[NoScaleOffset] _OcclusionMap ("Occlusion", 2D) = "white" {} //遮挡贴图
+		_OcclusionStrength ("Occlusion Strength", Range(0,1)) = 1 //遮挡强度
+	
+		[NoScaleOffset] _DetailMask ("Detail Mask", 2D) = "white" {} //细节遮罩贴图
 	}
 
 	CGINCLUDE
@@ -44,9 +49,15 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma multi_compile _ SHADOWS_SCREEN //屏幕空间阴影：将阴影贴图投射并转换到屏幕空间，生成一张屏幕空间的阴影纹理
 			#pragma multi_compile _ VERTEXLIGHT_ON //顶点光照：4个
 			//生成两个着色器变体(Shader Variants)，‘_’ 是占位符，表示不定义任何关键字的变体，即关闭某
+			
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC //高光平滑度来源
+			#pragma shader_feature _NORMAL_MAP//法线贴图
 			#pragma shader_feature _EMISSION_MAP //自发光贴图
+			#pragma shader_feature _OCCLUSION_MAP//遮挡贴图
+			#pragma shader_feature _DETAIL_MASK //细节遮罩贴图
+			#pragma shader_feature _DETAIL_ALBEDO_MAP //细节纹理
+			#pragma shader_feature _DETAIL_NORMAL_MAP //细节法线贴图
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
@@ -81,6 +92,10 @@ Shader "Custom/Physically-Based Shading"{
 			//DIRECTIONAL方向光，POINT点光源,SPOT聚光灯，COOKIE遮罩，
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC 
+			#pragma shader_feature _NORMAL_MAP
+			#pragma shader_feature _DETAIL_MASK
+			#pragma shader_feature _DETAIL_ALBEDO_MAP
+			#pragma shader_feature _DETAIL_NORMAL_MAP
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
