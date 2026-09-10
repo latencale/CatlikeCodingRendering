@@ -133,6 +133,30 @@ public class MyLightingShaderGUI : ShaderGUI
             m.SetInt("_DstBlend", (int)settings.dstBlend);
             m.SetInt("_ZWrite", settings.zWrite ? 1: 0);
         }
+
+        if(mode == RenderingMode.Fade || mode == RenderingMode.Transparent)
+        {
+            DoSemitransparentShadows();
+        }
+    }
+
+    //为半透明渲染模式应用阴影
+    void DoSemitransparentShadows()
+    {
+        EditorGUI.BeginChangeCheck();
+        bool semitransparentShadows = EditorGUILayout.Toggle(
+            new GUIContent("Semitransp. Shadows", "Semitransparent Shadows"),
+            IsKeywordEnabled("_SEMITRANSPARENT_SHADOWS")
+            );
+        //Toggle()复选框，返回T/F
+        if (EditorGUI.EndChangeCheck())
+        {
+            SetKeyword("_SEMITRANSPARENT_SHADOWS", semitransparentShadows);
+        }
+        if (!semitransparentShadows)
+        {
+            shouldShowAlphaCutoff = true;
+        }
     }
 
     //显示主贴图属性
