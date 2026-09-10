@@ -25,6 +25,12 @@ Shader "Custom/Physically-Based Shading"{
 		_OcclusionStrength ("Occlusion Strength", Range(0,1)) = 1 //遮挡强度
 	
 		[NoScaleOffset] _DetailMask ("Detail Mask", 2D) = "white" {} //细节遮罩贴图
+
+		_AlphaCutoff ("Alpha Cutoff",Range(0,1)) = 0.5 //透明度裁剪阈值
+	
+		[HideInInspector] _SrcBlend ("_SrcBlend", Float) = 1 //源颜色融合因子
+		[HideInInspector] _DstBlend ("_DstBlend", Float) = 0 //目标颜色融合因子
+		[HideInInspector] _ZWrite ("_ZWrite", Float) = 1 //深度写入
 	}
 
 	CGINCLUDE
@@ -41,6 +47,8 @@ Shader "Custom/Physically-Based Shading"{
 				//渲染主光源（最亮的方向光） 和 所有环境光/间接光
 			}
 
+			Blend [_SrcBlend] [_DstBlend]
+			//最终颜色 = 源颜色 * SrcAlpha + 目标颜色 * OneMinusSrcAlpha(即1 - SrcAlpha)
 
 			CGPROGRAM 
 
@@ -48,8 +56,9 @@ Shader "Custom/Physically-Based Shading"{
 
 			#pragma multi_compile _ SHADOWS_SCREEN //屏幕空间阴影：将阴影贴图投射并转换到屏幕空间，生成一张屏幕空间的阴影纹理
 			#pragma multi_compile _ VERTEXLIGHT_ON //顶点光照：4个
-			//生成两个着色器变体(Shader Variants)，‘_’ 是占位符，表示不定义任何关键字的变体，即关闭某
+			//生成两个着色器变体(Shader Variants)，‘_’ 是占位符，表示不定义任何关键字的变体，即关闭
 			
+			#pragma shader_feature _ _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT//透明度裁剪 透明度渐隐 透明度
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC //高光平滑度来源
 			#pragma shader_feature _NORMAL_MAP//法线贴图
@@ -58,6 +67,7 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma shader_feature _DETAIL_MASK //细节遮罩贴图
 			#pragma shader_feature _DETAIL_ALBEDO_MAP //细节纹理
 			#pragma shader_feature _DETAIL_NORMAL_MAP //细节法线贴图
+
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
@@ -76,10 +86,10 @@ Shader "Custom/Physically-Based Shading"{
 				//渲染额外光源（如点光源，聚光灯 等）			
 			}
 
-			Blend One One // 启用叠加混合模式，必须用
+			Blend [_SrcBlend] One // 启用叠加混合模式，必须用
 			//语法：Blend [SourceFactor] [DestinationFactor]
 			//One 表示因子=1
-			ZWrite Off//关闭Z-Buffer
+			ZWrite [_ZWrite] //根据_ZWrite的数值开关z-buffer
 
 			CGPROGRAM 
 
@@ -90,6 +100,7 @@ Shader "Custom/Physically-Based Shading"{
 			// _fullshadows:生成带阴影的额外光源变体
 			//为当前Pass生成多个Shader Variants,
 			//DIRECTIONAL方向光，POINT点光源,SPOT聚光灯，COOKIE遮罩，
+			#pragma shader_feature _ _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC 
 			#pragma shader_feature _NORMAL_MAP

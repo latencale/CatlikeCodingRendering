@@ -22,6 +22,8 @@ float3 _Emission; //自发光颜色
 sampler2D _OcclusionMap; //遮挡贴图
 float _OcclusionStrength; //遮挡强度
 
+float _AlphaCutoff; //透明度裁剪阈值
+
 struct Interpolators
 {
     float4 pos : POSITION;
@@ -183,9 +185,11 @@ float3 GetAlbedo(Interpolators i)
 float3 GetTangentSpaceNormal(Interpolators i)
 {
     float3 normal = float3(0, 0, 1);
+    
 #if defined(_NORMAL_MAP)
     normal = UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy), _BumpScale);
-#endif    
+#endif   
+    
 #if defined(_DETAIL_NORMAL_MAP)
     float3 detailNormal = UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
     //从法线贴图中获取法线向量，并将其从纹理空间转换为切线空间
@@ -194,6 +198,15 @@ float3 GetTangentSpaceNormal(Interpolators i)
 #endif
     return normal;
 }
+
+float GetAlpha(Interpolators i)
+{
+    float alpha = _Tint.a;
+#if !defined(_SMOOTHNESS_ALBEDO) //仅当不使用纹理的A通道判断平滑度时使用纹理
+    alpha *= tex2D(_MainTex, i.uv.xy).a;    
+#endif
+    return alpha;
+}   
 
 //创造直接光
 UnityLight CreateLight(inout Interpolators i)
@@ -308,6 +321,7 @@ void IntializeFragmentNormal(inout Interpolators i)
 #else
     float3 binormal = i.binormal;
 #endif
+    
     i.normal = normalize(
         tangentSpaceNormal.x * i.tangent + 
         tangentSpaceNormal.y * binormal +
@@ -317,6 +331,12 @@ void IntializeFragmentNormal(inout Interpolators i)
 
 float4 MyFragmentProgram(Interpolators i) : SV_TARGET
 {				
+    float alpha = GetAlpha(i);
+#if defined(_RENDERING_CUTOUT)//只在裁剪渲染时使用，完全不透明则不使用
+    clip(alpha - _AlphaCutoff); //裁剪掉透明度小于_alphaCutoff的片元
+    //clip函数用于丢弃片元，如果alpha小于_alphaCutoff，则丢弃该片元，避免渲染透明部分
+#endif
+    
     IntializeFragmentNormal(i);
     
     float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos); //我的视角
@@ -327,12 +347,21 @@ float4 MyFragmentProgram(Interpolators i) : SV_TARGET
     float3 albedo = DiffuseAndSpecularFromMetallic(
 					GetAlbedo(i), GetMetallic(i), specularTint, oneMinusReflectivity
 				);
-    
+    //预乘Alpha：先光照再预乘，高光和环境光会错误的乘Alpha，使颜色失真
+#if defined(_RENDERING_TRANSPARENT)
+    albedo *= alpha; //使透明度生效
+    alpha = 1 - oneMinusReflectivity + alpha * oneMinusReflectivity;
+#endif
+    //光照计算：漫反射+镜面反射+自发光
     float4 color = UNITY_BRDF_PBS(albedo, specularTint,
 					oneMinusReflectivity, GetSmoothness(i),
 					i.normal, viewDir,
 					CreateLight(i), CreateIndirectLight(i, viewDir));
     color.rgb += GetEmission(i);
+    //将透明度写入，设置透明
+#if defined(_RENDERING_FADE) || defined(_RENDERING_TRANSPARENT)
+    color.a = alpha; 
+#endif
     return color;
 }
 

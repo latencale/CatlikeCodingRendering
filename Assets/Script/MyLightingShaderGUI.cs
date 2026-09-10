@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEditor;
 public class MyLightingShaderGUI : ShaderGUI
 {
@@ -8,12 +9,67 @@ public class MyLightingShaderGUI : ShaderGUI
         Uniform, Albedo, Metallic //光滑度、主纹理、金属度贴图
     }
 
+    enum RenderingMode
+    {
+        Opaque, Cutout, Fade, Transparent //不透明、裁剪、淡入淡出、半透明
+    }
+
+    struct RenderingSettings
+    {
+        public RenderQueue queue;
+        //设置材质的渲染队列，根据渲染模式选择几何体、透明测试队列和半透明混合
+        //不透明物体(Opaque)的默认渲染队列为RenderQueue.Geometry == 2000；
+        //AlphaTest（镂空、栅栏）的渲染队列为RenderQueue.AlphaTest == 2450
+        public string renderType;
+        //设置材质的渲染类型，根据渲染模式选择不透明或透明裁剪类型
+        //渲染类型用于着色器替换和后处理
+        public BlendMode srcBlend, dstBlend;
+        public bool zWrite;
+
+        //静态数组，包含三种渲染模式的设置
+        public static RenderingSettings[] modes = {
+            new RenderingSettings()
+            {
+                queue = RenderQueue.Geometry,
+                renderType = "Opaque",
+                srcBlend = BlendMode.One,
+                dstBlend = BlendMode.Zero,
+                zWrite = true
+            },
+            new RenderingSettings()
+            {
+                queue = RenderQueue.AlphaTest,
+                renderType = "TransparentCutout",
+                srcBlend = BlendMode.One,
+                dstBlend = BlendMode.Zero,
+                zWrite = true
+            },
+            new RenderingSettings()
+            {
+                queue = RenderQueue.Transparent,
+                renderType = "Transparent",
+                srcBlend = BlendMode.SrcAlpha,
+                dstBlend = BlendMode.OneMinusSrcAlpha,
+                zWrite = false
+            },
+            new RenderingSettings()
+            {
+                queue = RenderQueue.Transparent,
+                renderType = "Transparent",
+                srcBlend = BlendMode.One,
+                dstBlend = BlendMode.OneMinusSrcAlpha,
+                zWrite = false
+            }
+        };
+}
+
     Material target;
     MaterialEditor editor;//材质编辑器实例
     MaterialProperty[] properties;//该材质所有可用的属性列表
     static GUIContent staticLabel = new GUIContent();//静态GUI内容实例，用于显示标签和提示信息
     static ColorPickerHDRConfig emissionConfig = new ColorPickerHDRConfig(0f, 99f, 1 / 99f, 3f);//HDR颜色选择器配置，用于发光属性的颜色选择
     //亮度的最小值、最大值、曝光的最小值、最大值
+    bool shouldShowAlphaCutoff;//是否显示Alpha裁剪滑块
 
     //显示材质属性的标签和提示信息
     static GUIContent MakeLabel (MaterialProperty property, string tooltip = null)
@@ -31,8 +87,52 @@ public class MyLightingShaderGUI : ShaderGUI
         //将材质编辑器的目标对象转换为Material类型
         this.editor = editor;
         this.properties = properties;
+        DoRenderingMode();
         DoMain();
         DoSecondary();
+    }
+
+    //显示渲染模式属性：不透明/裁剪
+    void DoRenderingMode()
+    {
+        RenderingMode mode = RenderingMode.Opaque;
+        shouldShowAlphaCutoff = false;
+        if (IsKeywordEnabled("_RENDERING_CUTOUT"))
+        {
+            mode = RenderingMode.Cutout;
+            shouldShowAlphaCutoff = true;
+        }
+        else if(IsKeywordEnabled("_RENDERING_FADE"))
+        {
+            mode = RenderingMode.Fade;
+        }
+        else if (IsKeywordEnabled("_RENDERING_TRANSPARENT"))
+        {
+            mode = RenderingMode.Transparent;
+        }
+
+        EditorGUI.BeginChangeCheck();
+        mode = (RenderingMode)EditorGUILayout.EnumPopup(
+            new GUIContent("Rendering Mode"), mode
+        );
+        if (EditorGUI.EndChangeCheck())
+        {
+            RecordAction("Rendering Mode");
+            SetKeyword("_RENDERING_CUTOUT", mode == RenderingMode.Cutout);
+            SetKeyword("_RENDERING_FADE", mode == RenderingMode.Fade);
+            SetKeyword("_RENDERING_TRANSPARENT", mode == RenderingMode.Transparent);
+        }
+
+        RenderingSettings settings = RenderingSettings.modes[(int)mode];
+        foreach (Material m in editor.targets)//遍历每个材质对象
+        //在Project视图中选中多个材质时，editor.targets包含所有选中的材质对象
+        { 
+            m.renderQueue = (int)settings.queue;
+            m.SetOverrideTag("RenderType", settings.renderType);
+            m.SetInt("_SrcBlend", (int)settings.srcBlend);
+            m.SetInt("_DstBlend", (int)settings.dstBlend);
+            m.SetInt("_ZWrite", settings.zWrite ? 1: 0);
+        }
     }
 
     //显示主贴图属性
@@ -49,6 +149,10 @@ public class MyLightingShaderGUI : ShaderGUI
         //显示一个单行的纹理属性编辑器，标签为"Albedo"，绑定的材质属性为"_MainTex"
         //最多绑定三个属性:标签内容GUIContent、纹理属性MaterialProperty、颜色属性MaterialProperty
 
+        if(shouldShowAlphaCutoff)
+        {
+            DoAlphaCutoff();
+        }
         DoMetallic();
         DoSmoothnes();
         DoNormals();
@@ -64,6 +168,14 @@ public class MyLightingShaderGUI : ShaderGUI
     MaterialProperty FindProperty(string name)
     {
         return FindProperty(name, properties);
+    }
+
+    void DoAlphaCutoff()
+    {
+        MaterialProperty slider = FindProperty("_AlphaCutoff");
+        EditorGUI.indentLevel += 2;
+        editor.ShaderProperty(slider, MakeLabel(slider));
+        EditorGUI.indentLevel -= 2;
     }
 
     void DoMetallic()
@@ -97,14 +209,19 @@ public class MyLightingShaderGUI : ShaderGUI
         EditorGUI.indentLevel += 2;
         editor.ShaderProperty(slider, MakeLabel(slider));
         //显示一个滑动条属性编辑器
+        //ShaderProperty(property, label)
+        //ShaderProperty()检查材质属性的类型，Color类型显示颜色选择器，Range类型显示滑动条，Vector类型显示四个浮点数输入框，Float类型显示一个浮点数输入框
         EditorGUI.indentLevel += 1;
         EditorGUI.BeginChangeCheck();
-        source = (SmoothnessSource)EditorGUILayout.EnumPopup(new GUIContent("Source"), source);
+        source = (SmoothnessSource)EditorGUILayout.EnumPopup(
+            new GUIContent("Source"), source
+        );
+        //EnumPopup显示一个枚举下拉框，标签为"Source"，绑定的枚举类型为SmoothnessSource
         if (EditorGUI.EndChangeCheck())
         {
             sourceProp.floatValue = (float)source;
 
-            RecordAction("Smoothness Source");
+            RecordAction("Smoothness Source");//注册材质属性更改的撤销操作
             SetKeyword("_SMOOTHNESS_ALBEDO", source == SmoothnessSource.Albedo);
             SetKeyword("_SMOOTHNESS_METALLIC", source == SmoothnessSource.Metallic);
         }
