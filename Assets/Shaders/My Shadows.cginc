@@ -68,7 +68,7 @@ InterpolatorsVertex MyShadowVertexProgram(VertexData v)
     InterpolatorsVertex i;
 #if defined(SHADOWS_CUBE)
      i.position = UnityObjectToClipPos(v.position);
-     i.lightVec = mul(unity_ObjectToWorld,v.position).xyz - LightPositionRange.xyz;
+     i.lightVec = mul(unity_ObjectToWorld,v.position).xyz - _LightPositionRange.xyz;
 #else
      i.position = UnityClipSpaceShadowCasterPos(v.position.xyz, v.normal);
      //从模型空间到裁剪空间，并根据法线方向对顶点位置进行微小的偏移：解决“阴影痤疮”问题

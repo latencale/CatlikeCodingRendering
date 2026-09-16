@@ -55,6 +55,18 @@ struct VertexData
     float2 uv : TEXCOORD0;
 };
 
+struct FragmentOutput
+{
+#if defined(DEFERRED_PASS)
+    float4 gBuffer0 : SV_Target0;
+    float4 gBuffer1 : SV_Target1;
+    float4 gBuffer2 : SV_Target2;
+    float4 gBuffer3 : SV_Target3;
+#else
+    float4 color : SV_Target;
+#endif
+};
+
 //四个顶点光源
 void ComputeVertexLightColor(inout Interpolators i)
 {
@@ -143,7 +155,7 @@ float GetSmoothness(Interpolators i)
 
 float3 GetEmission(Interpolators i)
 {
-#if defined(FORWARD_BASE_PASS)
+#if defined(FORWARD_BASE_PASS) || defined(DEFERRED_PASS)
     #if defined(_EMISSION_MAP)
         return tex2D(_EmissionMap, i.uv.xy) * _Emission;
     #else
@@ -213,18 +225,23 @@ UnityLight CreateLight(inout Interpolators i)
 {
     UnityLight light;
     
-#if defined(POINT) || defined(POINT_COOKIE) || defined(SPOT) 
-        light.dir = normalize(_WorldSpaceLightPos0.xyz - i.worldPos); //环境光的方向
-    #else   
-        light.dir = _WorldSpaceLightPos0.xyz;
-    #endif
+#if defined(DEFERRED_PASS)
+    light.dir = float3(0, 1, 0);
+    light.color = 0;
+#else  
+    #if defined(POINT) || defined(POINT_COOKIE) || defined(SPOT) 
+            light.dir = normalize(_WorldSpaceLightPos0.xyz - i.worldPos); //环境光的方向
+        #else   
+            light.dir = _WorldSpaceLightPos0.xyz;
+        #endif
     
-    UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos);
-    //插入计算正确衰减因子的代码，（变量名，包含阴影的插值器，世界坐标位置）
-        //该宏会自定义该变量
+        UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos);
+        //插入计算正确衰减因子的代码，（变量名，包含阴影的插值器，世界坐标位置）
+            //该宏会自定义该变量
     
-    light.color = _LightColor0.rgb * attenuation; //光的颜色
-    light.ndotl = DotClamped(i.normal, light.dir);//法线与光线方向的点积
+        light.color = _LightColor0.rgb * attenuation; //光的颜色
+#endif
+    
     return light;
 }
 
@@ -237,7 +254,7 @@ float3 BoxProjection(float3 direction, float3 position, float4 cubemapPosition, 
     {
         float3 factors = ((direction > 0 ? boxMax : boxMin) - position) / direction;
         //世界空间中的盒子边界，转换为以当前采样点position为原点的局部空间坐标
-        float scalar = min(min(factors.x, factors.y), factors.z); //道道盒子的时间，由最先被撞到的面决定
+        float scalar = min(min(factors.x, factors.y), factors.z); //到达盒子的时间，由最先被撞到的面决定
         direction = direction * scalar + (position - cubemapPosition); //立方体贴图中心到盒子边界的向量
     }
 #endif
@@ -255,7 +272,7 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
     indirectLight.diffuse = i.vertexLightColor;
 #endif
     
-#if defined(FORWARD_BASE_PASS)
+#if defined(FORWARD_BASE_PASS) || defined(DEFERRED_PASS)
     indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
      //ShadeSH9于计算 9 阶球谐函数（第 0 到第 2 阶）的环境光照
      float3 reflectionDir = reflect(-viewDir, i.normal);  
@@ -306,12 +323,15 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
     indirectLight.specular *= occlusion;
     //环境光遮蔽（AO）
     
+    #if defined(DEFERRED_PASS) && UNITY_ENABLE_REFLECTION_BUFFERS
+        indirectLight.specular = 0;
+    #endif
 #endif
     
     return indirectLight;
 }
 
-//初始化片元法线
+//初始化片元法线:从法线贴图采样的搭配切线空间法线，转化到世界空间法线
 void IntializeFragmentNormal(inout Interpolators i)
 {
     float3 tangentSpaceNormal = GetTangentSpaceNormal(i);
@@ -329,7 +349,7 @@ void IntializeFragmentNormal(inout Interpolators i)
     );
 }
 
-float4 MyFragmentProgram(Interpolators i) : SV_TARGET
+FragmentOutput MyFragmentProgram(Interpolators i) : SV_TARGET
 {				
     float alpha = GetAlpha(i);
 #if defined(_RENDERING_CUTOUT)//只在裁剪渲染时使用，完全不透明则不使用
@@ -352,6 +372,7 @@ float4 MyFragmentProgram(Interpolators i) : SV_TARGET
     albedo *= alpha; //使透明度生效
     alpha = 1 - oneMinusReflectivity + alpha * oneMinusReflectivity;
 #endif
+    
     //光照计算：漫反射+镜面反射+自发光
     float4 color = UNITY_BRDF_PBS(albedo, specularTint,
 					oneMinusReflectivity, GetSmoothness(i),
@@ -362,7 +383,22 @@ float4 MyFragmentProgram(Interpolators i) : SV_TARGET
 #if defined(_RENDERING_FADE) || defined(_RENDERING_TRANSPARENT)
     color.a = alpha; 
 #endif
-    return color;
+    
+    FragmentOutput output;
+#if defined(DEFERRED_PASS)
+    #if !defined(UNITY_HDR_ON)
+        color.rgb = exp2(-color.rgb); //自发光
+    #endif
+    output.gBuffer0.rgb = albedo; //漫反射
+    output.gBuffer0.a = GetOcclusion(i); //表面遮挡
+    output.gBuffer1.rgb = specularTint; //高光
+    output.gBuffer1.a = GetSmoothness(i); //平滑度
+    output.gBuffer2 = float4(i.normal * 0.5 + 0.5, 1); //法线
+    output.gBuffer3= color;
+#else
+    output.color = color;
+#endif
+    return output;
 }
 
 #endif
