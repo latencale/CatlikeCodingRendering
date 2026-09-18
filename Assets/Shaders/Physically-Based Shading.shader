@@ -36,6 +36,7 @@ Shader "Custom/Physically-Based Shading"{
 	CGINCLUDE
 
 	#define BINORMAL_PER_FRAGMENT
+	#define FOG_DISTANCE
 
 	ENDCG
 
@@ -57,7 +58,9 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma multi_compile _ SHADOWS_SCREEN //屏幕空间阴影：将阴影贴图投射并转换到屏幕空间，生成一张屏幕空间的阴影纹理
 			#pragma multi_compile _ VERTEXLIGHT_ON //顶点光照：4个
 			//生成两个着色器变体(Shader Variants)，‘_’ 是占位符，表示不定义任何关键字的变体，即关闭
-			
+			#pragma multi_compile_fog //雾效
+			//生成FOG_LINEAR,FOG_EXP,FOG_EXP2三个变体
+
 			#pragma shader_feature _ _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT//透明度裁剪 透明度渐隐 透明度
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC //高光平滑度来源
@@ -101,6 +104,8 @@ Shader "Custom/Physically-Based Shading"{
 			// _fullshadows:生成带阴影的额外光源变体
 			//为当前Pass生成多个Shader Variants,
 			//DIRECTIONAL方向光，POINT点光源,SPOT聚光灯，COOKIE遮罩，
+			#pragma multi_compile_fog
+			
 			#pragma shader_feature _ _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC 
@@ -127,7 +132,7 @@ Shader "Custom/Physically-Based Shading"{
 
 			#pragma target 3.0
 			#pragma exclude_renderers nomrt //不支持多个渲染目标时，排除
-			
+			 
 			#pragma shader_feature _ _RENDERING_CUTOUT
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC 

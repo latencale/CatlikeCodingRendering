@@ -4,6 +4,12 @@
 #include "UnityPBSLighting.cginc"
 #include "AutoLight.cginc"
 
+#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
+    #if !defined(FOG_DISTANCE)
+        #define FOG_DEPTH 1 
+    #endif
+    #define FOG_ON 1
+#endif
 
 float4 _Tint;
 sampler2D _MainTex, _DetailTex, _DetailMask; //sampler2D纹理读取器
@@ -36,8 +42,12 @@ struct Interpolators
     float3 tangent : TEXCOORD2;
     float3 binormal : TEXCOORD3;
 #endif
+#if FOG_DEPTH
+    float4 worldPos : TEXCOORD4;
+#else
     float3 worldPos : TEXCOORD4;
 				//SV代表系统值，POSITION代表顶点位置,TEXCOORD代表纹理坐标
+#endif
     
     SHADOW_COORDS(5)
     //用于存储阴影贴图采样坐标的成员变量，5为编号，即float4 _ShadowCoord : TEXCOORD5;
@@ -85,7 +95,7 @@ void ComputeVertexLightColor(inout Interpolators i)
         unity_4LightPosX0,unity_4LightPosY0, unity_4LightPosZ0,//位置
 		unity_LightColor[0].rgb, unity_LightColor[1].rgb,
 		unity_LightColor[2].rgb, unity_LightColor[3].rgb,//灯光颜色
-		unity_4LightAtten0, i.worldPos, i.normal//衰减系数，顶点位置，顶点法线
+		unity_4LightAtten0, i.worldPos.xyz, i.normal//衰减系数，顶点位置，顶点法线
 );
 #endif
 }
@@ -105,7 +115,10 @@ Interpolators MyVertexProgram(VertexData v)
     i.pos = UnityObjectToClipPos(v.vertex);
 				// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
 				//模型空间转换到裁剪空间
-    i.worldPos = mul(unity_ObjectToWorld, v.vertex);
+    i.worldPos.xyz = mul(unity_ObjectToWorld, v.vertex);
+    #if FOG_DEPTH
+        i.worldPos.w = i.pos.z;
+    #endif
     i.normal = UnityObjectToWorldNormal(v.normal);
 				//i.normal = mul(transpose((float3x3)unity_WorldToObject), v.normal);
 				//mul(A,B)矩阵乘法,unity_ObjectToWorld模型空间转换到世界空间,unity_WorldToObject世界空间转换到模型空间
@@ -220,6 +233,29 @@ float GetAlpha(Interpolators i)
     return alpha;
 }   
 
+//应用雾效
+float4 ApplyFog(float4 color, Interpolators i)
+{
+    #if FOG_ON
+        float viewDistance = length(_WorldSpaceCameraPos - i.worldPos.xyz);
+        #if FOG_DEPTH
+            viewDistance = UNITY_Z_0_FAR_FROM_CLIPSPACE(i.worldPos.w);
+            //UNITY_Z_0_FAR_FROM_CLIPSPACE()把不同图形API取值范围不容的裁剪空间z值，统一映射到[0,far]
+        #endif
+        UNITY_CALC_FOG_FACTOR_RAW(viewDistance);
+        //根据传输的距离值，计算unityFogFactor
+        //none / linear / exp / exp2 模式
+    
+        float3 fogColor = 0;
+        #if defined(FORWARD_BASE_PASS)
+            fogColor = unity_FogColor.rgb;
+        #endif
+        color.rgb = lerp(fogColor, color, saturate(unityFogFactor));
+        //unity_FogColor已经在后台定义了
+#endif
+    return color;
+}
+
 //创造直接光
 UnityLight CreateLight(inout Interpolators i)
 {
@@ -235,7 +271,7 @@ UnityLight CreateLight(inout Interpolators i)
             light.dir = _WorldSpaceLightPos0.xyz;
         #endif
     
-        UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos);
+        UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos.xyz);
         //插入计算正确衰减因子的代码，（变量名，包含阴影的插值器，世界坐标位置）
             //该宏会自定义该变量
     
@@ -290,14 +326,14 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
     
     Unity_GlossyEnvironmentData envData;//已过时
     envData.roughness = 1 - GetSmoothness(i);
-    envData.reflUVW = BoxProjection(reflectionDir, i.worldPos, 
+    envData.reflUVW = BoxProjection(reflectionDir, i.worldPos.xyz, 
         unity_SpecCube0_ProbePosition, 
         unity_SpecCube0_BoxMin, unity_SpecCube0_BoxMax
     );
     float3 probe0 = Unity_GlossyEnvironment(//旧版的环境镜面反射采样函数
         UNITY_PASS_TEXCUBE(unity_SpecCube0), unity_SpecCube0_HDR, envData
     );//宏，将反射探针数据传给函数，与反射探针关联给HDR解码数据，环境数据
-    envData.reflUVW = BoxProjection(reflectionDir, i.worldPos,
+    envData.reflUVW = BoxProjection(reflectionDir, i.worldPos.xyz,
         unity_SpecCube1_ProbePosition,
         unity_SpecCube1_BoxMin, unity_SpecCube1_BoxMax
     );
@@ -359,7 +395,7 @@ FragmentOutput MyFragmentProgram(Interpolators i) : SV_TARGET
     
     IntializeFragmentNormal(i);
     
-    float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos); //我的视角
+    float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos.xyz); //我的视角
 				//_WorldSpaceCameraPos代表相机的位置
 
     float3 specularTint; //镜面反射颜色
@@ -396,7 +432,7 @@ FragmentOutput MyFragmentProgram(Interpolators i) : SV_TARGET
     output.gBuffer2 = float4(i.normal * 0.5 + 0.5, 1); //法线
     output.gBuffer3= color;
 #else
-    output.color = color;
+    output.color = ApplyFog(color, i);
 #endif
     return output;
 }
