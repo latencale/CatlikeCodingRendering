@@ -66,6 +66,7 @@ Shader "Custom/Deffered Fog"
                 #endif
 
                 UNITY_CALC_FOG_FACTOR_RAW(viewDistance);
+                //根据雾效模式，计算出untiyFogFactor
                 unityFogFactor = saturate(unityFogFactor);
                 #if defined(FOG_SKYBOX)
                     if(depth > 0.9999){ //深度无限时（即天空盒），不进行雾化

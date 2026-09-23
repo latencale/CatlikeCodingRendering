@@ -72,6 +72,7 @@ struct FragmentOutput
     float4 gBuffer1 : SV_Target1;
     float4 gBuffer2 : SV_Target2;
     float4 gBuffer3 : SV_Target3;
+    //SV_TARGET[i]:把这个float4写入第i个渲染目标，即GBuffer纹理（_CameraGBufferTexture[i]）
 #else
     float4 color : SV_Target;
 #endif
