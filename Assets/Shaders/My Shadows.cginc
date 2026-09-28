@@ -19,10 +19,10 @@
 #endif
 
 
-float4 _Tint;
+float4 _Color;
 sampler2D _MainTex;
 float4 _MainTex_ST;
-float _AlphaCutoff;
+float _Cutoff;
 sampler3D _DitherMaskLOD;
 //3D纹理采样器，Unity内置抖动图案图集，用于半透明阴影的抖动裁剪
 //16个4*4的像素图标，存在x,y轴；z轴存索引index
@@ -83,7 +83,7 @@ InterpolatorsVertex MyShadowVertexProgram(VertexData v)
 
 float GetAlpha(Interpolators i)
 {
-    float alpha = _Tint.a;
+    float alpha = _Color.a;
 #if SHADOWS_NEED_UV 
     alpha *= tex2D(_MainTex, i.uv.xy).a;
 #endif
@@ -93,7 +93,7 @@ float GetAlpha(Interpolators i)
 float4 MyShadowFragmentProgram(Interpolators i) : SV_TARGET{
     float alpha = GetAlpha(i);
     #if defined(_RENDERING_CUTOUT)
-        clip(alpha - _AlphaCutoff);
+        clip(alpha - _Cutoff);
     #endif
     
     #if SHADOWS_SEMITRANSPARENT

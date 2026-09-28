@@ -11,7 +11,7 @@
     #define FOG_ON 1
 #endif
 
-float4 _Tint;
+float4 _Color;
 sampler2D _MainTex, _DetailTex, _DetailMask; //sampler2D纹理读取器
 float4 _MainTex_ST, _DetailTex_ST; //ST代表缩放(Scale)和平移(Translation)
 
@@ -28,7 +28,16 @@ float3 _Emission; //自发光颜色
 sampler2D _OcclusionMap; //遮挡贴图
 float _OcclusionStrength; //遮挡强度
 
-float _AlphaCutoff; //透明度裁剪阈值
+float _Cutoff; //透明度裁剪阈值
+
+struct VertexData
+{
+    float4 vertex : POSITION;
+    float3 normal : NORMAL;
+    float4 tangent : TANGENT;
+    float2 uv : TEXCOORD0;
+    float2 uv1 : TEXCOORD1;
+};
 
 struct Interpolators
 {
@@ -42,27 +51,23 @@ struct Interpolators
     float3 tangent : TEXCOORD2;
     float3 binormal : TEXCOORD3;
 #endif
+
 #if FOG_DEPTH
     float4 worldPos : TEXCOORD4;
 #else
     float3 worldPos : TEXCOORD4;
-				//SV代表系统值，POSITION代表顶点位置,TEXCOORD代表纹理坐标
+	//SV代表系统值，POSITION代表顶点位置,TEXCOORD代表纹理坐标
 #endif
     
     SHADOW_COORDS(5)
     //用于存储阴影贴图采样坐标的成员变量，5为编号，即float4 _ShadowCoord : TEXCOORD5;
     
-    #if defined(VERTEXLIGHT_ON)
-        float3 vertexLightColor : TEXCOORD6; //顶点光照颜色
-    #endif
-};
-
-struct VertexData
-{
-    float4 vertex : POSITION;
-    float3 normal : NORMAL;
-    float4 tangent : TANGENT;
-    float2 uv : TEXCOORD0;
+#if defined(VERTEXLIGHT_ON)
+    float3 vertexLightColor : TEXCOORD6; //顶点光照颜色
+#endif
+#if defined(LIGHTMAP_ON)
+    float2 lightmapUV : TEXCOORD6;
+#endif
 };
 
 struct FragmentOutput
@@ -77,6 +82,7 @@ struct FragmentOutput
     float4 color : SV_Target;
 #endif
 };
+
 
 //四个顶点光源
 void ComputeVertexLightColor(inout Interpolators i)
@@ -117,12 +123,12 @@ Interpolators MyVertexProgram(VertexData v)
 				// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
 				//模型空间转换到裁剪空间
     i.worldPos.xyz = mul(unity_ObjectToWorld, v.vertex);
-    #if FOG_DEPTH
-        i.worldPos.w = i.pos.z;
-    #endif
+#if FOG_DEPTH
+    i.worldPos.w = i.pos.z;
+#endif
     i.normal = UnityObjectToWorldNormal(v.normal);
-				//i.normal = mul(transpose((float3x3)unity_WorldToObject), v.normal);
-				//mul(A,B)矩阵乘法,unity_ObjectToWorld模型空间转换到世界空间,unity_WorldToObject世界空间转换到模型空间
+	//i.normal = mul(transpose((float3x3)unity_WorldToObject), v.normal);
+	//mul(A,B)矩阵乘法,unity_ObjectToWorld模型空间转换到世界空间,unity_WorldToObject世界空间转换到模型空间
 
 #if defined(BINORMAL_PER_FRAGMENT)
     i.tangent = float4(UnityObjectToWorldDir(v.tangent.xyz), v.tangent.w);
@@ -132,8 +138,12 @@ Interpolators MyVertexProgram(VertexData v)
 #endif
 
     i.uv.xy = TRANSFORM_TEX(v.uv, _MainTex);
-				//使用宏简写，i.uv = v.uv * _MainTex_ST.xy + _MainTex_ST.zw;
+	//使用宏简写，i.uv = v.uv * _MainTex_ST.xy + _MainTex_ST.zw;
     i.uv.zw = TRANSFORM_TEX(v.uv, _DetailTex);
+
+#if defined(LIGHTMAP_ON)
+    i.lightmapUV = v.uv1 * unity_LightmapST.xy + unity_LightmapST.zw;
+#endif
 
     TRANSFER_SHADOW(i);
     //计算阴影贴图的采样坐标，并将结果存储到传递结构体 i 的 _ShadowCoord 成员中。
@@ -200,7 +210,7 @@ float GetDetailMask(Interpolators i)
 
 float3 GetAlbedo(Interpolators i)
 {
-    float3 albedo = tex2D(_MainTex, i.uv.xy).rgb * _Tint.rgb; //反照率：物体的颜色
+    float3 albedo = tex2D(_MainTex, i.uv.xy).rgb * _Color.rgb; //反照率：物体的颜色
 #if defined(_DETAIL_ALBEDO_MAP)
     float3 details = tex2D(_DetailTex, i.uv.zw) * unity_ColorSpaceDouble;; //细节贴图
     albedo = lerp(albedo, albedo * details, GetDetailMask(i));
@@ -227,7 +237,7 @@ float3 GetTangentSpaceNormal(Interpolators i)
 
 float GetAlpha(Interpolators i)
 {
-    float alpha = _Tint.a;
+    float alpha = _Color.a;
 #if !defined(_SMOOTHNESS_ALBEDO) //仅当不使用纹理的A通道判断平滑度时使用纹理
     alpha *= tex2D(_MainTex, i.uv.xy).a;    
 #endif
@@ -310,8 +320,24 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
 #endif
     
 #if defined(FORWARD_BASE_PASS) || defined(DEFERRED_PASS)
-    indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
-     //ShadeSH9于计算 9 阶球谐函数（第 0 到第 2 阶）的环境光照
+    #if defined(LIGHTMAP_ON)
+        indirectLight.diffuse = DecodeLightmap(
+            UNITY_SAMPLE_TEX2D(unity_Lightmap, i.lightmapUV)//使用光照贴图时，间接光对光照贴图进行采样
+        );
+
+        #if defined(DIRLIGHTMAP_COMBINED) //合并方向光照贴图：可以烘焙法线的凹凸效果
+            float4 lightmapDirection = UNITY_SAMPLE_TEX2D_SAMPLER(//tex,sampler,uv
+                unity_LightmapInd, unity_Lightmap,//两者公用一个采样器，前者存储方向光照贴图的 方向信息，
+            i.lightmapUV );
+            //采样方向光照贴图
+            indirectLight.diffuse = DecodeDirectionalLightmap(
+                indirectLight.diffuse, lightmapDirection, i.normal
+            );//解码方向光照贴图
+        #endif
+    #else
+        indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
+        //ShadeSH9于计算 9 阶球谐函数（第 0 到第 2 阶）的环境光照
+     #endif
      float3 reflectionDir = reflect(-viewDir, i.normal);  
     
     /*
@@ -390,7 +416,7 @@ FragmentOutput MyFragmentProgram(Interpolators i) : SV_TARGET
 {				
     float alpha = GetAlpha(i);
 #if defined(_RENDERING_CUTOUT)//只在裁剪渲染时使用，完全不透明则不使用
-    clip(alpha - _AlphaCutoff); //裁剪掉透明度小于_alphaCutoff的片元
+    clip(alpha - _Cutoff); //裁剪掉透明度小于_alphaCutoff的片元
     //clip函数用于丢弃片元，如果alpha小于_alphaCutoff，则丢弃该片元，避免渲染透明部分
 #endif
     

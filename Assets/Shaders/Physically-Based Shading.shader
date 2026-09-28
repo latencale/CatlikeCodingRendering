@@ -2,7 +2,7 @@
 Shader "Custom/Physically-Based Shading"{
 	
 	Properties{
-		_Tint ("Tint", Color) = (1,1,1,1) //颜色
+		_Color ("Tint", Color) = (1,1,1,1) //颜色
 		_MainTex ("Albedo", 2D) = "white" {} //主纹理
 		
 		[NoScaleOffset] _NormalMap ("Normals", 2D) = "bump"{} //法线贴图
@@ -26,7 +26,7 @@ Shader "Custom/Physically-Based Shading"{
 	
 		[NoScaleOffset] _DetailMask ("Detail Mask", 2D) = "white" {} //细节遮罩贴图
 
-		_AlphaCutoff ("Alpha Cutoff",Range(0,1)) = 0.5 //透明度裁剪阈值
+		_Cutoff ("Alpha Cutoff",Range(0,1)) = 0.5 //透明度裁剪阈值
 	
 		[HideInInspector] _SrcBlend ("_SrcBlend", Float) = 1 //源颜色融合因子
 		[HideInInspector] _DstBlend ("_DstBlend", Float) = 0 //目标颜色融合因子
@@ -55,8 +55,8 @@ Shader "Custom/Physically-Based Shading"{
 
 			#pragma target 3.0
 
-			#pragma multi_compile _ SHADOWS_SCREEN //屏幕空间阴影：将阴影贴图投射并转换到屏幕空间，生成一张屏幕空间的阴影纹理
-			#pragma multi_compile _ VERTEXLIGHT_ON //顶点光照：4个
+			#pragma multi_compile_fwdbase //光照贴图、合并方向光照贴图、顶点光照：4个、屏幕空间阴影：将阴影贴图投射并转换到屏幕空间，生成一张屏幕空间的阴影纹理
+			//使用光照贴图，就不会使用顶点光源，二者互斥
 			//生成两个着色器变体(Shader Variants)，‘_’ 是占位符，表示不定义任何关键字的变体，即关闭
 			#pragma multi_compile_fog //雾效
 			//生成FOG_LINEAR,FOG_EXP,FOG_EXP2三个变体
@@ -143,7 +143,7 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma shader_feature _DETAIL_ALBEDO_MAP 
 			#pragma shader_feature _DETAIL_NORMAL_MAP 
 
-			#pragma multi_compile _ UNITY_HDR_ON
+			#pragma multi_compile_prepassfinal //传统延迟渲染管线
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
@@ -181,6 +181,30 @@ Shader "Custom/Physically-Based Shading"{
 
 			ENDCG
 		}
+
+		Pass{
+			Tags{
+				"LightMode" = "Meta" //光照烘焙通道
+				//为全局光照烘焙系统提供物体表面信息，调用反照率和自发光等
+			}
+
+			Cull Off
+
+			CGPROGRAM
+
+			#pragma vertex MyLightmappingVertexProgram
+			#pragma fragment MyLightmappingFragmentProgram
+
+			#pragma shader_feature _METALLIC_MAP
+			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC
+			#pragma shader_feature _EMISSION_MAP
+			#pragma shader_feature _DETAIL_MASK
+			#pragma shader_feature _DETAIL_ALBEDO_MAP
+
+			#include "My Lightmapping.cginc"
+
+			ENDCG
+		}
 	}
-	CustomEditor "MyLightingShaderGUI"
+	CustomEditor "MyLightingShaderGUI1"
 }

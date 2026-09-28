@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEditor;
-public class MyLightingShaderGUI : ShaderGUI
+public class MyLightingShaderGUI1 : ShaderGUI
 {
     //光滑度的来源
     enum SmoothnessSource
@@ -169,7 +169,7 @@ public class MyLightingShaderGUI : ShaderGUI
         GUIContent albedoLabel = new GUIContent(mainTex.displayName, "Albedo (RGB)");
         GUIContent是Unity中用于显示GUI元素的内容类，可以包含文本、图像和提示信息等
         */
-        editor.TexturePropertySingleLine(MakeLabel(mainTex, "Albedo (RGB)"), mainTex, FindProperty("_Tint"));
+        editor.TexturePropertySingleLine(MakeLabel(mainTex, "Albedo (RGB)"), mainTex, FindProperty("_Color"));
         //显示一个单行的纹理属性编辑器，标签为"Albedo"，绑定的材质属性为"_MainTex"
         //最多绑定三个属性:标签内容GUIContent、纹理属性MaterialProperty、颜色属性MaterialProperty
 
@@ -196,7 +196,7 @@ public class MyLightingShaderGUI : ShaderGUI
 
     void DoAlphaCutoff()
     {
-        MaterialProperty slider = FindProperty("_AlphaCutoff");
+        MaterialProperty slider = FindProperty("_Cutoff");
         EditorGUI.indentLevel += 2;
         editor.ShaderProperty(slider, MakeLabel(slider));
         EditorGUI.indentLevel -= 2;
@@ -280,6 +280,7 @@ public class MyLightingShaderGUI : ShaderGUI
     void DoEmission()
     {
         MaterialProperty map = FindProperty("_EmissionMap");
+        Texture tex = map.textureValue;
         EditorGUI.BeginChangeCheck();//开始检查材质属性是否发生变化
         editor.TexturePropertyWithHDRColor(
             MakeLabel(map, "Emission (RGB)"), map, FindProperty("_Emission"),
@@ -287,7 +288,17 @@ public class MyLightingShaderGUI : ShaderGUI
         );
         if (EditorGUI.EndChangeCheck())//结束检查材质属性是否发生变化
         {
-            SetKeyword("_EMISSION_MAP", map.textureValue);
+            if (tex != map.textureValue)
+            {
+                SetKeyword("_EMISSION_MAP", map.textureValue);
+            }
+
+            foreach(Material m in editor.targets)
+            {
+                m.globalIlluminationFlags =
+                    MaterialGlobalIlluminationFlags.BakedEmissive;
+                //所有材质的全局光照模式设置为 烘焙自发光模式
+            }
         }
     }
 
