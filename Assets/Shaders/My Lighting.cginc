@@ -11,6 +11,18 @@
     #define FOG_ON 1
 #endif
 
+#if !defined(LIGHTMAP_ON) && defined(SHADOWS_SCREEN)
+    #if defined(SHADOWS_SHADOWMASK) && !defined(UNITY_NO_SCREENSPACE_SHADOWS)
+        #define ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS 1
+    #endif
+#endif
+
+#if defined(LIGHTMAP_ON) && defined(SHADOWS_SCREEN)
+	#if defined(LIGHTMAP_SHADOW_MIXING) && !defined(SHADOWS_SHADOWMASK)
+		#define SUBTRACTIVE_LIGHTING 1
+	#endif
+#endif
+
 float4 _Color;
 sampler2D _MainTex, _DetailTex, _DetailMask; //sampler2D纹理读取器
 float4 _MainTex_ST, _DetailTex_ST; //ST代表缩放(Scale)和平移(Translation)
@@ -59,13 +71,13 @@ struct Interpolators
 	//SV代表系统值，POSITION代表顶点位置,TEXCOORD代表纹理坐标
 #endif
     
-    SHADOW_COORDS(5)
+    UNITY_SHADOW_COORDS(5)
     //用于存储阴影贴图采样坐标的成员变量，5为编号，即float4 _ShadowCoord : TEXCOORD5;
     
 #if defined(VERTEXLIGHT_ON)
     float3 vertexLightColor : TEXCOORD6; //顶点光照颜色
 #endif
-#if defined(LIGHTMAP_ON)
+#if defined(LIGHTMAP_ON) || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
     float2 lightmapUV : TEXCOORD6;
 #endif
 };
@@ -78,6 +90,10 @@ struct FragmentOutput
     float4 gBuffer2 : SV_Target2;
     float4 gBuffer3 : SV_Target3;
     //SV_TARGET[i]:把这个float4写入第i个渲染目标，即GBuffer纹理（_CameraGBufferTexture[i]）
+
+    #if defined(SHADOWS_SHADOWMASK) && (UNITY_ALLOWED_MRT_COUNT > 4)
+        float4 gBuffer4 : SV_Target4;
+    #endif
 #else
     float4 color : SV_Target;
 #endif
@@ -119,6 +135,7 @@ float3 CreateBinormal(float3 normal, float3 tangent, float binormalSign)
 Interpolators MyVertexProgram(VertexData v)
 {
     Interpolators i;
+    UNITY_INITIALIZE_OUTPUT(Interpolators, i);//初始化输出结构体i，避免未初始化的警告
     i.pos = UnityObjectToClipPos(v.vertex);
 				// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
 				//模型空间转换到裁剪空间
@@ -141,11 +158,11 @@ Interpolators MyVertexProgram(VertexData v)
 	//使用宏简写，i.uv = v.uv * _MainTex_ST.xy + _MainTex_ST.zw;
     i.uv.zw = TRANSFORM_TEX(v.uv, _DetailTex);
 
-#if defined(LIGHTMAP_ON)
+#if defined(LIGHTMAP_ON) || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
     i.lightmapUV = v.uv1 * unity_LightmapST.xy + unity_LightmapST.zw;
 #endif
 
-    TRANSFER_SHADOW(i);
+    UNITY_TRANSFER_SHADOW(i, v.uv1);
     //计算阴影贴图的采样坐标，并将结果存储到传递结构体 i 的 _ShadowCoord 成员中。
     
     ComputeVertexLightColor(i);
@@ -267,12 +284,27 @@ float4 ApplyFog(float4 color, Interpolators i)
     return color;
 }
 
+//阴影渐变
+float FadeShadows(Interpolators i, float attenuation){
+    #if HANDLE_SHADOWS_BLENDING_IN_GI  || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS //在GI中处理阴影混合
+        #if ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
+            attenuation = SHADOW_ATTENUATION(i);
+        #endif
+        float viewZ = dot(_WorldSpaceCameraPos - i.worldPos, UNITY_MATRIX_V[2].xyz);
+        float shadowFadeDistance = UnityComputeShadowFadeDistance(i.worldPos, viewZ);
+        float shadowFade = UnityComputeShadowFade(shadowFadeDistance);
+        float bakedAttenuation = UnitySampleBakedOcclusion(i.lightmapUV, i.worldPos);
+        attenuation = UnityMixRealtimeAndBakedShadows(attenuation, bakedAttenuation, shadowFade);
+    #endif
+    return attenuation;
+}
+
 //创造直接光
-UnityLight CreateLight(inout Interpolators i)
+UnityLight CreateLight(Interpolators i)
 {
     UnityLight light;
     
-#if defined(DEFERRED_PASS)
+#if defined(DEFERRED_PASS) || SUBTRACTIVE_LIGHTING
     light.dir = float3(0, 1, 0);
     light.color = 0;
 #else  
@@ -285,6 +317,7 @@ UnityLight CreateLight(inout Interpolators i)
         UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos.xyz);
         //插入计算正确衰减因子的代码，（变量名，包含阴影的插值器，世界坐标位置）
             //该宏会自定义该变量
+        attenuation = FadeShadows(i, attenuation);
     
         light.color = _LightColor0.rgb * attenuation; //光的颜色
 #endif
@@ -307,6 +340,21 @@ float3 BoxProjection(float3 direction, float3 position, float4 cubemapPosition, 
 #endif
     return direction;
 }
+
+void ApplySubtractiveLighting(Interpolators i, inout UnityIndirect indirectLight){
+    #if SUBTRACTIVE_LIGHTING
+        UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos.xyz);
+        attenuation = FadeShadows(i, attenuation);
+
+        float ndotl = saturate(dot(i.normal, _WorldSpaceLightPos0.xyz));
+        float3 shadowedLightEstimate = ndotl * (1 - attenuation) * _LightColor0.rgb;
+        float3 subtractedLight = indirectLight.diffuse - shadowedLightEstimate;
+        subtractedLight = max(subtractedLight, unity_ShadowColor.rgb);
+        subtractedLight = lerp(subtractedLight, indirectLight.diffuse, _LightShadowData.x);
+        indirectLight.diffuse = min(subtractedLight, indirectLight.diffuse);
+    #endif
+}
+
 
 //创造间接光
 UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
@@ -334,6 +382,7 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
                 indirectLight.diffuse, lightmapDirection, i.normal
             );//解码方向光照贴图
         #endif
+        ApplySubtractiveLighting(i, indirectLight);
     #else
         indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
         //ShadeSH9于计算 9 阶球谐函数（第 0 到第 2 阶）的环境光照
@@ -458,6 +507,14 @@ FragmentOutput MyFragmentProgram(Interpolators i) : SV_TARGET
     output.gBuffer1.a = GetSmoothness(i); //平滑度
     output.gBuffer2 = float4(i.normal * 0.5 + 0.5, 1); //法线
     output.gBuffer3= color;
+
+    #if defined(SHADOWS_SHADOWMASK) && (UNITY_ALLOWED_MRT_COUNT > 4)
+        float2 shadowUV = 0;
+        #if defined(LIGHTMAP_ON)
+            shadowUV = i.lightmapUV;
+        #endif
+        output.gBuffer4 = UnityGetRawBakedOcclusions(shadowUV, i.worldPos.xyz);
+    #endif
 #else
     output.color = ApplyFog(color, i);
 #endif

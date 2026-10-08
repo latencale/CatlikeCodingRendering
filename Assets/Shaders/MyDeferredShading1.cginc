@@ -9,7 +9,7 @@ sampler2D _CameraDepthTexture; //GBuffer
 sampler2D _CameraGBufferTexture0; //Albedo + 遮罩
 sampler2D _CameraGBufferTexture1; //Specular + Smoothness
 sampler2D _CameraGBufferTexture2; //世界空间法线
-
+sampler2D _CameraGBufferTexture4;// 阴影衰减
 #if defined(POINT_COOKIE)
     samplerCUBE _LightTexture0;
 #else
@@ -47,6 +47,15 @@ Interpolators VertexProgram(VertexData v)
     //得到一个齐次坐标
     i.ray = lerp(UnityObjectToViewPos(v.vertex) * float3(-1, -1, 1), v.normal, _LightAsQuad);
     return i;
+}
+
+float GetShadowMaskAttenuation(float2 uv){
+    float attenuation =1;
+    #if defined(SHADOWS_SHADOWMASK)
+        float4 mask = tex2D(_CameraGBufferTexture4, uv);
+        attenuation = saturate(dot(mask, unity_OcclusionMaskSelector));
+    #endif
+    return attenuation;
 }
 
 UnityLight CreateLight(float2 uv, float3 worldPos, float viewZ)
@@ -102,6 +111,10 @@ UnityLight CreateLight(float2 uv, float3 worldPos, float viewZ)
         #endif
     #endif
 #endif
+
+#if defined(SHADOWS_SHADOWMASK)
+    shadowed = true;
+#endif
     
     if (shadowed)
     {
@@ -110,14 +123,18 @@ UnityLight CreateLight(float2 uv, float3 worldPos, float viewZ)
         //阴影接近fade distance时，阴影逐渐淡化
         float shadowFade = UnityComputeShadowFade(shadowFadeDistance);
         //UnityComputeShadowFade()计算出合适的淡出系数
-        shadowAttenuation = saturate(shadowAttenuation + shadowFade);
+        shadowAttenuation = UnityMixRealtimeAndBakedShadows(
+            shadowAttenuation, GetShadowMaskAttenuation(uv), shadowFade
+        );
         //实现衰减效果
         
         #if defined(UNITY_FAST_COHERENT_DYNAMIC_BRANCHING) && defined(SHADOWS_SOFT)
-			UNITY_BRANCH
-			if (shadowFade > 0.99) {
-				shadowAttenuation = 1;
-			}
+            #if !defined(SHADOWS_SHADOWMASK)
+			    UNITY_BRANCH
+			    if (shadowFade > 0.99) {
+				    shadowAttenuation = 1;
+			    }
+                #endif
         #endif
     }
     
