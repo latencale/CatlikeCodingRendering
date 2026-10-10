@@ -60,6 +60,7 @@ Shader "Custom/Physically-Based Shading"{
 			//生成两个着色器变体(Shader Variants)，‘_’ 是占位符，表示不定义任何关键字的变体，即关闭
 			#pragma multi_compile_fog //雾效
 			//生成FOG_LINEAR,FOG_EXP,FOG_EXP2三个变体
+			#pragma multi_compile _ LOD_FADE_CROSSFADE
 
 			#pragma shader_feature _ _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT//透明度裁剪 透明度渐隐 透明度
 			#pragma shader_feature _METALLIC_MAP
@@ -105,7 +106,8 @@ Shader "Custom/Physically-Based Shading"{
 			//为当前Pass生成多个Shader Variants,
 			//DIRECTIONAL方向光，POINT点光源,SPOT聚光灯，COOKIE遮罩，
 			#pragma multi_compile_fog
-			
+			#pragma multi_compile _ LOD_FADE_CROSSFADE
+
 			#pragma shader_feature _ _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC 
@@ -143,6 +145,7 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma shader_feature _DETAIL_ALBEDO_MAP 
 			#pragma shader_feature _DETAIL_NORMAL_MAP 
 
+			#pragma multi_compile _ LOD_FADE_CROSSFADE
 			#pragma multi_compile_prepassfinal //传统延迟渲染管线
 
 			#pragma vertex MyVertexProgram
@@ -166,6 +169,7 @@ Shader "Custom/Physically-Based Shading"{
 
 			#pragma target 3.0
 
+			#pragma multi_compile _ LOD_FADE_CROSSFADE
 			#pragma multi_compile_shadowcaster
 			//添加两个关键字及对应的着色器变体：SHADOWS_DEPTH 和 SHADOWS_CUBE
 			//由于 点光源(立方体贴图) 和 方向光/聚光灯(深度贴图) 在着色器代码有差异

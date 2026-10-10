@@ -49,9 +49,10 @@ struct VertexData
     float4 tangent : TANGENT;
     float2 uv : TEXCOORD0;
     float2 uv1 : TEXCOORD1;
+    float2 uv2 : TEXCOORD2;
 };
 
-struct Interpolators
+struct InterpolatorsVertex
 {
     float4 pos : POSITION;
     float4 uv : TEXCOORD0; //主uv 和 细节uv
@@ -79,6 +80,48 @@ struct Interpolators
 #endif
 #if defined(LIGHTMAP_ON) || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
     float2 lightmapUV : TEXCOORD6;
+#endif
+#if defined(DYNAMICLIGHTMAP_ON)
+    float2 dynamicLightmapUV :TEXCOORD7;
+#endif
+};
+
+struct Interpolators
+{
+#if defined(LOD_FADE_CROSSFADE)
+    UNITY_VPOS_TYPE vpos : VPOS;
+#else
+    float4 pos : POSITION;
+#endif
+
+    float4 uv : TEXCOORD0; //主uv 和 细节uv
+    float3 normal : TEXCOORD1; //第二套纹理
+    
+#if defined(BINORMAL_PER_FRAGMENT)//在片元着色器进行运算
+    float4 tangent : TEXCOORD2;//切线空间
+#else//在顶点着色器进行运算，与Unity标准着色器一致
+    float3 tangent : TEXCOORD2;
+    float3 binormal : TEXCOORD3;
+#endif
+
+#if FOG_DEPTH
+    float4 worldPos : TEXCOORD4;
+#else
+    float3 worldPos : TEXCOORD4;
+	//SV代表系统值，POSITION代表顶点位置,TEXCOORD代表纹理坐标
+#endif
+    
+    UNITY_SHADOW_COORDS(5)
+    //用于存储阴影贴图采样坐标的成员变量，5为编号，即float4 _ShadowCoord : TEXCOORD5;
+    
+#if defined(VERTEXLIGHT_ON)
+    float3 vertexLightColor : TEXCOORD6; //顶点光照颜色
+#endif
+#if defined(LIGHTMAP_ON) || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
+    float2 lightmapUV : TEXCOORD6;
+#endif
+#if defined(DYNAMICLIGHTMAP_ON)
+    float2 dynamicLightmapUV :TEXCOORD7;
 #endif
 };
 
@@ -132,10 +175,10 @@ float3 CreateBinormal(float3 normal, float3 tangent, float binormalSign)
 
 }
 
-Interpolators MyVertexProgram(VertexData v)
+InterpolatorsVertex MyVertexProgram(VertexData v)
 {
-    Interpolators i;
-    UNITY_INITIALIZE_OUTPUT(Interpolators, i);//初始化输出结构体i，避免未初始化的警告
+    InterpolatorsVertex i;
+    UNITY_INITIALIZE_OUTPUT(InterpolatorsVertex, i);//初始化输出结构体i，避免未初始化的警告
     i.pos = UnityObjectToClipPos(v.vertex);
 				// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
 				//模型空间转换到裁剪空间
@@ -160,6 +203,10 @@ Interpolators MyVertexProgram(VertexData v)
 
 #if defined(LIGHTMAP_ON) || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
     i.lightmapUV = v.uv1 * unity_LightmapST.xy + unity_LightmapST.zw;
+#endif
+
+#if defined(DYNAMICLIGHTMAP_ON)
+    i.dynamicLightmapUV = v.uv2 * unity_DynamicLightmapST.xy + unity_DynamicLightmapST.zw;
 #endif
 
     UNITY_TRANSFER_SHADOW(i, v.uv1);
@@ -368,6 +415,7 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
 #endif
     
 #if defined(FORWARD_BASE_PASS) || defined(DEFERRED_PASS)
+
     #if defined(LIGHTMAP_ON)
         indirectLight.diffuse = DecodeLightmap(
             UNITY_SAMPLE_TEX2D(unity_Lightmap, i.lightmapUV)//使用光照贴图时，间接光对光照贴图进行采样
@@ -383,22 +431,45 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
             );//解码方向光照贴图
         #endif
         ApplySubtractiveLighting(i, indirectLight);
-    #else
-        indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
-        //ShadeSH9于计算 9 阶球谐函数（第 0 到第 2 阶）的环境光照
      #endif
-     float3 reflectionDir = reflect(-viewDir, i.normal);  
+
+     #if defined(DYNAMICLIGHTMAP_ON)
+        float3 dynamicLightDiffuse = DecodeRealtimeLightmap(
+            UNITY_SAMPLE_TEX2D(unity_DynamicLightmap, i.dynamicLightmapUV)
+        );
+
+        #if defined(DIRLIGHTMAP_COMBINED)
+            float4 dynamicLightmapDirection = UNITY_SAMPLE_TEX2D_SAMPLER(
+                unity_DynamicDirectionality, unity_DynamicLightmap, i.dynamicLightmapUV
+            );
+            indirectLight.diffuse += DecodeDirectionalLightmap(
+                dynamicLightDiffuse, dynamicLightmapDirection, i.normal
+            );
+        #else
+            indirectLight.diffuse += dynamicLightDiffuse;
+        #endif
+     #endif
+
+	#if !defined(LIGHTMAP_ON) && !defined(DYNAMICLIGHTMAP_ON)
+        #if UNITY_LIGHT_PROBE_PROXY_VOLUME
+            if(unity_ProbeVolumeParams.x == 1){ //使用LPPV的物体
+                indirectLight.diffuse = SHEvalLinearL0L1_SampleProbeVolume( //采样LPPV:两个球谐函数L0，L1进行插值
+                    float4(i.normal, 1), i.worldPos
+                );
+                indirectLight.diffuse = max(0, indirectLight.diffuse);
+                #if defined(UNITY_COLORSPACEC_GAMMA)
+                    indirectLight.diffuse = LinearToGammaSpace(indirectLight.diffuse);
+                #endif
+            }
+            else{
+                indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
+            }
+        #else
+		    indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
+	    #endif
+    #endif
+    float3 reflectionDir = reflect(-viewDir, i.normal);  
     
-    /*
-    float roughness = 1 - _Smoothness;
-    roughness *= 1.7 - 0.7 * roughness;//粗糙度与mipmap的关系函数：1.7 * r - 0.7 * r^2
-    float4 envSample = UNITY_SAMPLE_TEXCUBE_LOD(
-        unity_SpecCube0, reflectionDir, roughness * UNITY_SPECCUBE_LOD_STEPS
-    );//环境采样,光滑度越低，mipmap较高，生成更模糊的图像。
-    //UNTIY_SPECCUBE_LOD_STEPS用于表示反射模糊程度的立方体贴图（Cubemap）的 Mipmap 层级数量
-    indirectLight.specular = DecodeHDR(envSample, unity_SpecCube0_HDR);
-    //将采样从HDR格式转化为RGB，使用DecodeHDR函数
-    */
     
     Unity_GlossyEnvironmentData envData;//已过时
     envData.roughness = 1 - GetSmoothness(i);
@@ -463,6 +534,10 @@ void IntializeFragmentNormal(inout Interpolators i)
 
 FragmentOutput MyFragmentProgram(Interpolators i) : SV_TARGET
 {				
+#if defined(LOD_FADE_CROSSFADE)
+    UnityApplyDitherCrossFade(i.vpos);//抖动以淡入淡出
+#endif
+
     float alpha = GetAlpha(i);
 #if defined(_RENDERING_CUTOUT)//只在裁剪渲染时使用，完全不透明则不使用
     clip(alpha - _Cutoff); //裁剪掉透明度小于_alphaCutoff的片元
@@ -490,8 +565,10 @@ FragmentOutput MyFragmentProgram(Interpolators i) : SV_TARGET
 					oneMinusReflectivity, GetSmoothness(i),
 					i.normal, viewDir,
 					CreateLight(i), CreateIndirectLight(i, viewDir));
+#if !defined(_RENDERING_TRANSPARENT) && !defined(_RENDERING_FADE)
     color.rgb += GetEmission(i);
     //将透明度写入，设置透明
+#endif
 #if defined(_RENDERING_FADE) || defined(_RENDERING_TRANSPARENT)
     color.a = alpha; 
 #endif

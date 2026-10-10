@@ -15,7 +15,7 @@ Material:
   - _RENDERING_CUTOUT
   - _SEMITRANSPARENT_SHADOWS
   m_InvalidKeywords: []
-  m_LightmapFlags: 4
+  m_LightmapFlags: 0
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: 2450
@@ -78,7 +78,7 @@ Material:
     m_Floats:
     - _AlphaCutoff: 0.432
     - _BumpScale: 1
-    - _Cutoff: 0.5
+    - _Cutoff: 0.25
     - _DetailBumpScale: 1
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
@@ -89,7 +89,7 @@ Material:
     - _Mode: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.02
-    - _Smoothness: 0.52
+    - _Smoothness: 0
     - _SmoothnessSource: 0
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
@@ -98,7 +98,7 @@ Material:
     - _ZWrite: 1
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _Emission: {r: 1, g: 1, b: 1, a: 1}
+    - _Emission: {r: 0.045186214, g: 0.045186214, b: 0.045186214, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _Tint: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

@@ -12,15 +12,15 @@ Material:
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
-  - _RENDERING_CUTOUT
-  - _SMOOTHNESS_METALLIC
+  - _RENDERING_TRANSPARENT
+  - _SMOOTHNESS_ALBEDO
   m_InvalidKeywords: []
-  m_LightmapFlags: 4
+  m_LightmapFlags: 0
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 2450
+  m_CustomRenderQueue: 3000
   stringTagMap:
-    RenderType: TransparentCutout
+    RenderType: Transparent
   disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
@@ -86,24 +86,24 @@ Material:
     m_Floats:
     - _AlphaCutoff: 0.427
     - _BumpScale: 1
-    - _Cutoff: 0.602
+    - _Cutoff: 0
     - _DetailBumpScale: 0.3
     - _DetailNormalMapScale: 1
-    - _DstBlend: 0
+    - _DstBlend: 10
     - _GlossMapScale: 1
     - _Glossiness: 0.5
     - _GlossyReflections: 1
-    - _Metallic: 0
+    - _Metallic: 0.6
     - _Mode: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.02
     - _Smoothness: 1
-    - _SmoothnessSource: 2
+    - _SmoothnessSource: 1
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SrcBlend: 1
     - _UVSec: 0
-    - _ZWrite: 1
+    - _ZWrite: 0
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _Emission: {r: 0, g: 0, b: 0, a: 1}

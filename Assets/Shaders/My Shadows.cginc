@@ -47,7 +47,7 @@ struct InterpolatorsVertex
 
 struct Interpolators
 {
-#if SHADOWS_SEMITRANSPARENT
+#if SHADOWS_SEMITRANSPARENT || defined(LOD_FADE_CROSSFADE)
     UNITY_VPOS_TYPE vpos : VPOS;
     //再半透明模式，声明一个VPOS
     //VPOS：屏幕空间中的像素坐标
@@ -91,6 +91,10 @@ float GetAlpha(Interpolators i)
 }
 
 float4 MyShadowFragmentProgram(Interpolators i) : SV_TARGET{
+    #if defined(LOD_FADE_CROSSFADE)
+        UnityApplyDitherCrossFade(i.vpos);
+    #endif
+
     float alpha = GetAlpha(i);
     #if defined(_RENDERING_CUTOUT)
         clip(alpha - _Cutoff);

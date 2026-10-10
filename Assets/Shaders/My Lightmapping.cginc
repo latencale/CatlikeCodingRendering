@@ -19,6 +19,7 @@ struct VertexData {
 	float4 vertex : POSITION;
 	float2 uv : TEXCOORD0;
 	float2 uv1 : TEXCOORD1;
+    float2 uv2 : TEXCOORD2;
 };
 
 struct Interpolators {
@@ -28,11 +29,9 @@ struct Interpolators {
 
 Interpolators MyLightmappingVertexProgram(VertexData v){
     Interpolators i;
-    v.vertex.xy = v.uv1 *  unity_LightmapST.xy + unity_LightmapST.zw;
-    //把顶点的坐标替换成光照贴图的uv坐标，把物体放到光照贴图纹理的正确位置上
-    v.vertex.z = v.vertex.z > 0 ? 0.0001 : 0;
-    //在所有平台上都正常运行，防止因深度越界被裁剪掉
-    i.pos = UnityObjectToClipPos(v.vertex);
+    i.pos = UnityMetaVertexPosition(
+        v.vertex, v.uv1, v.uv2, unity_LightmapST, unity_DynamicLightmapST
+    );//顶点的坐标转换为uv坐标：两套uv分别用于 静态光照贴图 和 动态光照贴图
     i.uv.xy = TRANSFORM_TEX(v.uv, _MainTex);
     i.uv.zw = TRANSFORM_TEX(v.uv, _DetailTex);
     return i;

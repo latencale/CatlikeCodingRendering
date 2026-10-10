@@ -283,9 +283,9 @@ public class MyLightingShaderGUI1 : ShaderGUI
         Texture tex = map.textureValue;
         EditorGUI.BeginChangeCheck();//开始检查材质属性是否发生变化
         editor.TexturePropertyWithHDRColor(
-            MakeLabel(map, "Emission (RGB)"), map, FindProperty("_Emission"),
-            emissionConfig,false
+            MakeLabel(map, "Emission (RGB)"), map, FindProperty("_Emission"),false
         );
+        editor.LightmapEmissionProperty(2);//显示光照贴图发光属性编辑器，参数为缩放系数
         if (EditorGUI.EndChangeCheck())//结束检查材质属性是否发生变化
         {
             if (tex != map.textureValue)
@@ -295,9 +295,9 @@ public class MyLightingShaderGUI1 : ShaderGUI
 
             foreach(Material m in editor.targets)
             {
-                m.globalIlluminationFlags =
-                    MaterialGlobalIlluminationFlags.BakedEmissive;
-                //所有材质的全局光照模式设置为 烘焙自发光模式
+                m.globalIlluminationFlags &=
+                    ~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+                //清除材质的全局光照标志位，表示材质不再是黑色发光
             }
         }
     }
