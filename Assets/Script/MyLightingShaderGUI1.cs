@@ -90,6 +90,7 @@ public class MyLightingShaderGUI1 : ShaderGUI
         DoRenderingMode();
         DoMain();
         DoSecondary();
+        DoAdvanced();
     }
 
     //显示渲染模式属性：不透明/裁剪
@@ -180,6 +181,7 @@ public class MyLightingShaderGUI1 : ShaderGUI
         DoMetallic();
         DoSmoothnes();
         DoNormals();
+        DoParallax();
         DoOcclusion();
         DoEmission();
         DoDetailMask();
@@ -263,6 +265,20 @@ public class MyLightingShaderGUI1 : ShaderGUI
         }
     }
 
+        void DoParallax()
+    {
+        MaterialProperty map = FindProperty("_ParallaxMap");
+        EditorGUI.BeginChangeCheck();
+        editor.TexturePropertySingleLine(
+            MakeLabel(map, "Parallax (G)"), map,
+            map.textureValue ? FindProperty("_ParallaxStrength") : null
+        );
+        if (EditorGUI.EndChangeCheck())
+        {
+            SetKeyword("_PARALLAX_MAP", map.textureValue);
+        }
+    }
+
     void DoOcclusion()
     {
         MaterialProperty map = FindProperty("_OcclusionMap");
@@ -276,6 +292,7 @@ public class MyLightingShaderGUI1 : ShaderGUI
             SetKeyword("_OCCLUSION_MAP", map.textureValue);
         }
     }
+
 
     void DoEmission()
     {
@@ -379,5 +396,12 @@ public class MyLightingShaderGUI1 : ShaderGUI
     {
         editor.RegisterPropertyChangeUndo(label);
         //注册材质属性更改的撤销操作
+    }
+
+    void DoAdvanced()
+    {
+        GUILayout.Label("Advanced Options", EditorStyles.boldLabel);
+
+        editor.EnableInstancingField();
     }
 }

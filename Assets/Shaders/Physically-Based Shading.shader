@@ -21,6 +21,9 @@ Shader "Custom/Physically-Based Shading"{
 		[NoScaleOffset] _EmissionMap ("Emission", 2D) = "black" {} //自发光贴图
 		_Emission ("Emission", Color) = (0,0,0) //自发光强度
 
+		[NoScaleOffset] _ParallaxMap ("Parallax", 2D) = "black" {} //视差贴图
+		_ParallaxStrength ("Parallax Strength", Range(0,0.1)) = 0 //强度
+
 		[NoScaleOffset] _OcclusionMap ("Occlusion", 2D) = "white" {} //遮挡贴图
 		_OcclusionStrength ("Occlusion Strength", Range(0,1)) = 1 //遮挡强度
 	
@@ -37,6 +40,15 @@ Shader "Custom/Physically-Based Shading"{
 
 	#define BINORMAL_PER_FRAGMENT
 	#define FOG_DISTANCE
+
+
+	#define PARALLAX_BIAS 0
+	//#define PARALLAX_OFFSET_LIMITING
+	#define PARALLAX_RAYMARCHING_STEPS 10
+	#define PARALLAX_RAYMARCHING_INTERPOLATE
+	#define PARALLAX_RAYMARCHING_SEARCH_STEPS 3
+	#define PARALLAX_FUNCTION ParallaxRaymarching
+	#define PARALLAX_SUPPORT_SCALED_DYNAMIC_BATCHING
 
 	ENDCG
 
@@ -61,6 +73,8 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma multi_compile_fog //雾效
 			//生成FOG_LINEAR,FOG_EXP,FOG_EXP2三个变体
 			#pragma multi_compile _ LOD_FADE_CROSSFADE
+			#pragma multi_compile_instancing
+			#pragma instancing_options lodfade
 
 			#pragma shader_feature _ _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT//透明度裁剪 透明度渐隐 透明度
 			#pragma shader_feature _METALLIC_MAP
@@ -71,7 +85,7 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma shader_feature _DETAIL_MASK //细节遮罩贴图
 			#pragma shader_feature _DETAIL_ALBEDO_MAP //细节纹理
 			#pragma shader_feature _DETAIL_NORMAL_MAP //细节法线贴图
-
+			#pragma shader_feature _PARALLAX_MAP //视差贴图
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
@@ -107,6 +121,9 @@ Shader "Custom/Physically-Based Shading"{
 			//DIRECTIONAL方向光，POINT点光源,SPOT聚光灯，COOKIE遮罩，
 			#pragma multi_compile_fog
 			#pragma multi_compile _ LOD_FADE_CROSSFADE
+			#pragma multi_compile_instancing
+			#pragma instancing_options lodfade
+
 
 			#pragma shader_feature _ _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT
 			#pragma shader_feature _METALLIC_MAP
@@ -115,6 +132,7 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma shader_feature _DETAIL_MASK
 			#pragma shader_feature _DETAIL_ALBEDO_MAP
 			#pragma shader_feature _DETAIL_NORMAL_MAP
+			#pragma shader_feature _PARALLAX_MAP
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
@@ -134,7 +152,13 @@ Shader "Custom/Physically-Based Shading"{
 
 			#pragma target 3.0
 			#pragma exclude_renderers nomrt //不支持多个渲染目标时，排除
-			 
+
+			#pragma multi_compile _ LOD_FADE_CROSSFADE
+			#pragma multi_compile_prepassfinal //传统延迟渲染管线			 
+			#pragma multi_compile_instancing
+			#pragma instancing_options lodfade
+
+
 			#pragma shader_feature _ _RENDERING_CUTOUT
 			#pragma shader_feature _METALLIC_MAP
 			#pragma shader_feature _ _SMOOTHNESS_ALBEDO _SMOOTHNESS_METALLIC 
@@ -144,9 +168,7 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma shader_feature _DETAIL_MASK 
 			#pragma shader_feature _DETAIL_ALBEDO_MAP 
 			#pragma shader_feature _DETAIL_NORMAL_MAP 
-
-			#pragma multi_compile _ LOD_FADE_CROSSFADE
-			#pragma multi_compile_prepassfinal //传统延迟渲染管线
+			#pragma shader_feature _PARALLAX_MAP
 
 			#pragma vertex MyVertexProgram
 			#pragma fragment MyFragmentProgram
@@ -173,6 +195,9 @@ Shader "Custom/Physically-Based Shading"{
 			#pragma multi_compile_shadowcaster
 			//添加两个关键字及对应的着色器变体：SHADOWS_DEPTH 和 SHADOWS_CUBE
 			//由于 点光源(立方体贴图) 和 方向光/聚光灯(深度贴图) 在着色器代码有差异
+			#pragma multi_compile_instancing
+			#pragma instancing_options lodfade
+
 
 			#pragma shader_feature _RENDERING_CUTOUT _RENDERING_FADE _RENDERING_TRANSPARENT
 			#pragma shader_feature _SMOOTHNESS_ALBEDO	

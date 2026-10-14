@@ -1,3 +1,7 @@
+// Upgrade NOTE: upgraded instancing buffer 'InstanceProperties' to new syntax.
+
+// Upgrade NOTE: upgraded instancing buffer 'InstanceProperties' to new syntax.
+
 #if !defined(MY_LIGHTING_INCLUDED)
 #define MY_LIGHTING_INCLUDED
 
@@ -23,7 +27,11 @@
 	#endif
 #endif
 
-float4 _Color;
+UNITY_INSTANCING_BUFFER_START(InstanceProperties)
+    UNITY_DEFINE_INSTANCED_PROP(float4, _Color)
+#define _Color_arr InstanceProperties
+UNITY_INSTANCING_BUFFER_END(InstanceProperties)
+
 sampler2D _MainTex, _DetailTex, _DetailMask; //sampler2D纹理读取器
 float4 _MainTex_ST, _DetailTex_ST; //ST代表缩放(Scale)和平移(Translation)
 
@@ -37,6 +45,9 @@ float _BumpScale, _DetailBumpScale;//凹凸
 sampler2D _EmissionMap; //自发光贴图
 float3 _Emission; //自发光颜色
 
+sampler2D _ParallaxMap; //视差贴图
+float _ParallaxStrength; //强度
+      
 sampler2D _OcclusionMap; //遮挡贴图
 float _OcclusionStrength; //遮挡强度
 
@@ -44,6 +55,7 @@ float _Cutoff; //透明度裁剪阈值
 
 struct VertexData
 {
+    UNITY_VERTEX_INPUT_INSTANCE_ID // 声明实例ID
     float4 vertex : POSITION;
     float3 normal : NORMAL;
     float4 tangent : TANGENT;
@@ -54,6 +66,7 @@ struct VertexData
 
 struct InterpolatorsVertex
 {
+    UNITY_VERTEX_INPUT_INSTANCE_ID
     float4 pos : POSITION;
     float4 uv : TEXCOORD0; //主uv 和 细节uv
     float3 normal : TEXCOORD1; //第二套纹理
@@ -84,10 +97,14 @@ struct InterpolatorsVertex
 #if defined(DYNAMICLIGHTMAP_ON)
     float2 dynamicLightmapUV :TEXCOORD7;
 #endif
+#if defined(_PARALLAX_MAP)
+    float3 tangentViewDir : TEXCOORD8;
+#endif
 };
 
 struct Interpolators
 {
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 #if defined(LOD_FADE_CROSSFADE)
     UNITY_VPOS_TYPE vpos : VPOS;
 #else
@@ -123,6 +140,9 @@ struct Interpolators
 #if defined(DYNAMICLIGHTMAP_ON)
     float2 dynamicLightmapUV :TEXCOORD7;
 #endif
+#if defined(_PARALLAX_MAP)
+    float3 tangentViewDir : TEXCOORD8;
+#endif
 };
 
 struct FragmentOutput
@@ -147,22 +167,12 @@ struct FragmentOutput
 void ComputeVertexLightColor(inout Interpolators i)
 {
 #if defined(VERTEXLIGHT_ON)
-/*    float3 lightPos = float3(
-        unity_4LightPosX0.x, unity_4LightPosY0.x, unity_4LightPosZ0.x
-    );//第一个光源的坐标
-    float3 lightVec = lightPos - i.worldPos;
-    float3 lightDir = normalize(lightVec);
-    float ndotl = DotClamped(i.normal, lightDir);
-    float attenuation = 1 / (1 + dot(lightVec, lightVec) * unity_4LightAtten0.x);//衰减
-    //在VERTEXLIGHT_ON定义后，有前四个非重要的光源的位置untiy_4LightPosX0,Y0,Z0，颜色unity_LightColor[4]，衰减unity_4LightAtten0
-    i.vertexLightColor = unity_LightColor[0].rgb * ndotl * attenuation;
-*/
     i.vertexLightColor = Shade4PointLights(
         unity_4LightPosX0,unity_4LightPosY0, unity_4LightPosZ0,//位置
 		unity_LightColor[0].rgb, unity_LightColor[1].rgb,
 		unity_LightColor[2].rgb, unity_LightColor[3].rgb,//灯光颜色
 		unity_4LightAtten0, i.worldPos.xyz, i.normal//衰减系数，顶点位置，顶点法线
-);
+    );
 #endif
 }
 
@@ -172,13 +182,14 @@ float3 CreateBinormal(float3 normal, float3 tangent, float binormalSign)
     return cross(normal, tangent.xyz) *
         (binormalSign * unity_WorldTransformParams.w);
         //i.tangent.w在模型被镜像时是-1， unity_WorldTransformParams.w在世界空间被镜像时是-1
-
 }
 
 InterpolatorsVertex MyVertexProgram(VertexData v)
 {
     InterpolatorsVertex i;
     UNITY_INITIALIZE_OUTPUT(InterpolatorsVertex, i);//初始化输出结构体i，避免未初始化的警告
+    UNITY_SETUP_INSTANCE_ID(v) //在顶点着色器中提取实例ID并设置内部状态
+    UNITY_TRANSFER_INSTANCE_ID(v,i); //将实例ID从vertex传到fragment
     i.pos = UnityObjectToClipPos(v.vertex);
 				// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
 				//模型空间转换到裁剪空间
@@ -213,6 +224,21 @@ InterpolatorsVertex MyVertexProgram(VertexData v)
     //计算阴影贴图的采样坐标，并将结果存储到传递结构体 i 的 _ShadowCoord 成员中。
     
     ComputeVertexLightColor(i);
+
+#if defined(_PARALLAX_MAP)
+    //动态批处理时Unity不会对法线和切线向量进行归一化
+    #if defined(PARALLAX_SUPPORT_SCALED_DYNAMIC_BATCHING)
+        v.tangent.xyz = normalize(v.tangent.xyz);
+        v.normal = normalize(v.normal);
+    #endif
+    float3x3 objectToTangent = float3x3(
+        v.tangent.xyz,
+        cross(v.normal, v.tangent.xyz) * v.tangent.w,
+        v.normal
+    );
+    i.tangentViewDir = mul(objectToTangent, ObjSpaceViewDir(v.vertex));
+#endif
+
     return i;
 				
 }
@@ -274,7 +300,7 @@ float GetDetailMask(Interpolators i)
 
 float3 GetAlbedo(Interpolators i)
 {
-    float3 albedo = tex2D(_MainTex, i.uv.xy).rgb * _Color.rgb; //反照率：物体的颜色
+    float3 albedo = tex2D(_MainTex, i.uv.xy).rgb * UNITY_ACCESS_INSTANCED_PROP(_Color_arr, _Color).rgb; //反照率：物体的颜色
 #if defined(_DETAIL_ALBEDO_MAP)
     float3 details = tex2D(_DetailTex, i.uv.zw) * unity_ColorSpaceDouble;; //细节贴图
     albedo = lerp(albedo, albedo * details, GetDetailMask(i));
@@ -301,12 +327,103 @@ float3 GetTangentSpaceNormal(Interpolators i)
 
 float GetAlpha(Interpolators i)
 {
-    float alpha = _Color.a;
+    float alpha = UNITY_ACCESS_INSTANCED_PROP(_Color_arr, _Color).a;
 #if !defined(_SMOOTHNESS_ALBEDO) //仅当不使用纹理的A通道判断平滑度时使用纹理
     alpha *= tex2D(_MainTex, i.uv.xy).a;    
 #endif
     return alpha;
 }   
+
+float GetParallaxHeight(float2 uv){
+    return tex2D(_ParallaxMap, uv).g;
+}
+
+//视差偏移：简单近似，适合高度变化平缓的表面
+    //高度越高，uv偏移越大，视角方向决定偏移方向
+float2 ParallaxOffset(float2 uv, float2 viewDir){
+    float height = GetParallaxHeight(uv);
+    height -= 0.5; //[0, 1]映射到[-0.5, 0.5]
+    height *= _ParallaxStrength;
+    return height * viewDir;
+}
+
+//视差偏移：光线步进
+float2 ParallaxRaymarching(float2 uv, float2 viewDir){
+    #if !defined(PARALLAX_RAYMARCHING_STEPS)
+        #define PARALLAX_RAYMARCHING_STEPS 10
+    #endif
+    float2 uvOffset = 0;
+    float stepSize = 1.0 / PARALLAX_RAYMARCHING_STEPS;
+    float2 uvDelta = viewDir * (stepSize * _ParallaxStrength);
+
+    float stepHeight = 1; //从表面顶部开始
+    float surfaceHeight = GetParallaxHeight(uv); //当前采样点的高度
+
+    float2 prevUVOffset = uvOffset;
+    float prevStepHeight = stepHeight;
+    float prevSurfaceHeight = surfaceHeight;
+
+    //沿视线方向逐步下降，直到步进高度低于表面高度
+    for(int i = 0; i < PARALLAX_RAYMARCHING_STEPS && stepHeight > surfaceHeight; i++){
+        prevUVOffset = uvOffset;
+        prevStepHeight = stepHeight;
+        prevSurfaceHeight = surfaceHeight;
+        
+        uvOffset -= uvDelta;
+        stepHeight -= stepSize;
+        surfaceHeight = GetParallaxHeight(uv + uvOffset);
+    }
+    #if !defined(PARALLAX_RAYMARCHING_SEARCH_STEPS)
+        #define PARALLAX_RAYMARCHING_SEARCH_STEPS 0
+    #endif
+    //最后两个采样点进行二分
+    #if PARALLAX_RAYMARCHING_SEARCH_STEPS > 0
+        for(int i = 0; i < PARALLAX_RAYMARCHING_SEARCH_STEPS; i++){
+            uvDelta *= 0.5;
+            stepSize *= 0.5;
+            
+            if(stepHeight < surfaceHeight){
+                uvOffset += uvDelta;
+                stepHeight += stepSize;
+            }
+            else{
+                uvOffset -= uvDelta;
+                stepHeight -= stepSize;
+            }
+          surfaceHeight = GetParallaxHeight(uv + uvOffset);
+        }
+    //最后两个采样点进行线性插值，让结果更平滑
+    #elif defined(PARALLAX_RAYMARCHING_INTERPOLATE)
+        float prevDifference = prevStepHeight - prevSurfaceHeight;
+	    float difference = surfaceHeight - stepHeight;
+	    float t = prevDifference / (prevDifference + difference);
+	    uvOffset = prevUVOffset - uvDelta * t;
+    #endif
+
+    return uvOffset;
+}
+
+//应用视差
+void ApplyParallax(inout Interpolators i){
+    #if defined(_PARALLAX_MAP)
+        i.tangentViewDir = normalize(i.tangentViewDir);
+        #if !defined(PARALLAX_OFFSET_LIMITING)
+            #if !defined(PARALLAX_BIAS)
+                #define PARALLAX_BIAS 0.42
+            #endif
+            //视差偏置：避免在掠射角（视线与表面几乎平行）时UV偏移过大
+            i.tangentViewDir.xy /= (i.tangentViewDir.z + PARALLAX_BIAS);
+        #endif
+        #if !defined(PARALLAX_FUNCTION)
+            #define PARALLAX_FUNCTION ParallaxOffset
+        #endif
+        //选择视差函数
+        float2 uvOffset = PARALLAX_FUNCTION(i.uv.xy, i.tangentViewDir.xy);
+        //应用uv偏移：主纹理和细节纹理
+        i.uv.xy += uvOffset;
+        i.uv.zw += uvOffset * _DetailTex_ST.xy;
+    #endif
+}
 
 //应用雾效
 float4 ApplyFog(float4 color, Interpolators i)
@@ -517,6 +634,7 @@ UnityIndirect CreateIndirectLight(Interpolators i, float3 viewDir)
 //初始化片元法线:从法线贴图采样的搭配切线空间法线，转化到世界空间法线
 void IntializeFragmentNormal(inout Interpolators i)
 {
+    UNITY_SETUP_INSTANCE_ID(i);
     float3 tangentSpaceNormal = GetTangentSpaceNormal(i);
     
 #if defined(BINORMAL_PER_FRAGMENT)
@@ -534,9 +652,12 @@ void IntializeFragmentNormal(inout Interpolators i)
 
 FragmentOutput MyFragmentProgram(Interpolators i) : SV_TARGET
 {				
+    UNITY_SETUP_INSTANCE_ID(i);
 #if defined(LOD_FADE_CROSSFADE)
     UnityApplyDitherCrossFade(i.vpos);//抖动以淡入淡出
 #endif
+
+    ApplyParallax(i);
 
     float alpha = GetAlpha(i);
 #if defined(_RENDERING_CUTOUT)//只在裁剪渲染时使用，完全不透明则不使用
